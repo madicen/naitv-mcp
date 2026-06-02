@@ -159,9 +159,9 @@ func TestStore_ListFiltersTags(t *testing.T) {
 	e1 := entry.Entry{Kind: "note", Name: "tagged-ab", Tags: []string{"a", "b"}}
 	e2 := entry.Entry{Kind: "note", Name: "tagged-a", Tags: []string{"a"}}
 	e3 := entry.Entry{Kind: "note", Name: "tagged-c", Tags: []string{"c"}}
-	s.Create(e1)
-	s.Create(e2)
-	s.Create(e3)
+	_, _ = s.Create(e1)
+	_, _ = s.Create(e2)
+	_, _ = s.Create(e3)
 
 	res, err := s.List("", []string{"a"})
 	if err != nil {
@@ -192,8 +192,8 @@ func TestStore_ListFiltersTags(t *testing.T) {
 func TestStore_SearchFTS(t *testing.T) {
 	s := openTestStore(t)
 
-	s.Create(makeEntry("arch", "service design", "we run on a monolith architecture"))
-	s.Create(makeEntry("arch", "microservices", "split into many services"))
+	_, _ = s.Create(makeEntry("arch", "service design", "we run on a monolith architecture"))
+	_, _ = s.Create(makeEntry("arch", "microservices", "split into many services"))
 
 	results, err := s.Search("monolith")
 	if err != nil {
@@ -211,7 +211,7 @@ func TestStore_SearchFTS(t *testing.T) {
 func TestStore_ActiveOnlyFiltering(t *testing.T) {
 	s := openTestStore(t)
 
-	s.Create(makeEntry("note", "active-one", "visible content"))
+	_, _ = s.Create(makeEntry("note", "active-one", "visible content"))
 
 	proposal := entry.Entry{Kind: "note", Name: "pending-one", Body: "hidden pending content"}
 	_, _ = s.CreatePending(proposal)
