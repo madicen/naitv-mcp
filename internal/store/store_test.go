@@ -123,9 +123,9 @@ func TestStore_Delivery(t *testing.T) {
 func TestStore_ListFiltersKind(t *testing.T) {
 	s := openTestStore(t)
 
-	s.Create(makeEntry("note", "note-1", "body"))
-	s.Create(makeEntry("note", "note-2", "body"))
-	s.Create(makeEntry("task", "task-1", "body"))
+	_, _ = s.Create(makeEntry("note", "note-1", "body"))
+	_, _ = s.Create(makeEntry("note", "note-2", "body"))
+	_, _ = s.Create(makeEntry("task", "task-1", "body"))
 
 	notes, err := s.List("note", nil)
 	if err != nil {
@@ -159,9 +159,9 @@ func TestStore_ListFiltersTags(t *testing.T) {
 	e1 := entry.Entry{Kind: "note", Name: "tagged-ab", Tags: []string{"a", "b"}}
 	e2 := entry.Entry{Kind: "note", Name: "tagged-a", Tags: []string{"a"}}
 	e3 := entry.Entry{Kind: "note", Name: "tagged-c", Tags: []string{"c"}}
-	s.Create(e1)
-	s.Create(e2)
-	s.Create(e3)
+	_, _ = s.Create(e1)
+	_, _ = s.Create(e2)
+	_, _ = s.Create(e3)
 
 	res, err := s.List("", []string{"a"})
 	if err != nil {
@@ -192,8 +192,8 @@ func TestStore_ListFiltersTags(t *testing.T) {
 func TestStore_SearchFTS(t *testing.T) {
 	s := openTestStore(t)
 
-	s.Create(makeEntry("arch", "service design", "we run on a monolith architecture"))
-	s.Create(makeEntry("arch", "microservices", "split into many services"))
+	_, _ = s.Create(makeEntry("arch", "service design", "we run on a monolith architecture"))
+	_, _ = s.Create(makeEntry("arch", "microservices", "split into many services"))
 
 	results, err := s.Search("monolith")
 	if err != nil {
@@ -211,10 +211,10 @@ func TestStore_SearchFTS(t *testing.T) {
 func TestStore_ActiveOnlyFiltering(t *testing.T) {
 	s := openTestStore(t)
 
-	s.Create(makeEntry("note", "active-one", "visible content"))
+	_, _ = s.Create(makeEntry("note", "active-one", "visible content"))
 
 	proposal := entry.Entry{Kind: "note", Name: "pending-one", Body: "hidden pending content"}
-	s.CreatePending(proposal)
+	_, _ = s.CreatePending(proposal)
 
 	all, err := s.List("", nil)
 	if err != nil {
@@ -346,7 +346,7 @@ func TestStore_ApproveAll(t *testing.T) {
 	s := openTestStore(t)
 
 	for i := 0; i < 3; i++ {
-		s.CreatePending(entry.Entry{Kind: "note", Name: "pending", Body: "body"})
+		_, _ = s.CreatePending(entry.Entry{Kind: "note", Name: "pending", Body: "body"})
 	}
 
 	count, err := s.PendingCount()
@@ -429,13 +429,13 @@ func TestStore_PendingCount(t *testing.T) {
 		t.Errorf("after 3 creates: want 3, got %d", c)
 	}
 
-	s.Approve(p1.ID)
+	_, _ = s.Approve(p1.ID)
 	c, _ = s.PendingCount()
 	if c != 2 {
 		t.Errorf("after 1 approve: want 2, got %d", c)
 	}
 
-	s.Reject(p2.ID)
+	_ = s.Reject(p2.ID)
 	c, _ = s.PendingCount()
 	if c != 1 {
 		t.Errorf("after 1 reject: want 1, got %d", c)

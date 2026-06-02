@@ -74,7 +74,7 @@ func TestJourney_EditEntry(t *testing.T) {
 
 	// Reload.
 	loaded = entries.LoadEntriesCmd(st, "")()
-	m = updateModel(m, loaded)
+	updateModel(m, loaded)
 
 	updated, err := st.Get(orig.ID)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestJourney_DeleteEntry(t *testing.T) {
 
 	// Press 'd' then 'y' to confirm delete.
 	m = runPendingCmds(m, key("d"), 3)
-	m = runPendingCmds(m, key("y"), 5)
+	runPendingCmds(m, key("y"), 5)
 
 	// Verify deletion via store directly (TUI should have called st.Delete).
 	active, _ := st.List("", nil)

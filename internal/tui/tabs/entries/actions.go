@@ -50,7 +50,7 @@ func ToggleDeliveryCmd(st *store.Store, id, kind string) tea.Cmd {
 // DeleteEntryCmd deletes an entry from the store.
 func DeleteEntryCmd(st *store.Store, id string) tea.Cmd {
 	return func() tea.Msg {
-		st.Delete(id)
+		_ = st.Delete(id)
 		return EntryDeletedMsg{ID: id}
 	}
 }
