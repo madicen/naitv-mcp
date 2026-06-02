@@ -1,0 +1,85 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+
+project_name: naitv-mcp
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: naitv-mcp
+    main: ./cmd/naitv-mcp
+    binary: naitv-mcp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+
+homebrew_casks:
+  - name: naitv-mcp
+    repository:
+      owner: madicen
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/madicen/naitv-mcp"
+    description: "Local MCP server + TUI for managing AI agent context"
+    license: "MIT"
+    binaries:
+      - naitv-mcp
+    # Unsigned GitHub release binaries are quarantined on macOS; strip the
+    # attribute on install so the cask runs without manual xattr steps.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/naitv-mcp"]
+          end
+
+release:
+  github:
+    owner: madicen
+    name: naitv-mcp
+  draft: false
+  prerelease: auto
+  name_template: "v{{ .Version }}"

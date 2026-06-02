@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "naitv-mcp": {
+      "command": "/Users/michael.madicen/Documents/GitHub/naitv-mcp/bin/naitv-mcp",
+      "args": ["serve"]
+    }
+  }
+}
