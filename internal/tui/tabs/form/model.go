@@ -3,10 +3,12 @@ package form
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
+	bubbledropdown "github.com/madicen/bubble-dropdown"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -14,7 +16,7 @@ import (
 type Mode int
 
 const (
-	ModeCreate       Mode = iota
+	ModeCreate Mode = iota
 	ModeEdit
 	ModeEditProposal
 )
@@ -41,23 +43,44 @@ type Model struct {
 	focusIdx      int
 	kind          textinput.Model
 	name          textinput.Model
+	group         textinput.Model
 	tags          textinput.Model
 	fields        []FieldPair
 	body          textinput.Model
-	sourceID      string
-	proposalID    string
-	delivery      entry.Delivery
+	// Pass-through fields: not exposed in the form UI but must survive
+	// PopulateFrom → ToEntry so store.Update doesn't zero them out.
+	sourceID         string
+	sourceStatus     entry.Status
+	sourceProposedBy string
+	sourceProposedAt *time.Time
+	sourceTargetID   string
+	proposalID       string
+	delivery         entry.Delivery
 	width, height int
 	zoneManager   *zone.Manager
+
+	// Kind selection: kindDD is a dropdown of existing kinds plus a
+	// "+ New kind…" sentinel. When newKindMode is set the kind textinput is
+	// revealed for free-text entry. kinds is the raw set; ddKinds is the
+	// non-empty subset used for the option-index ↔ kind mapping.
+	kindDD      *bubbledropdown.Dropdown
+	kinds       []string
+	ddKinds     []string
+	newKindMode bool
+	// kindDDRow is the content-line index of the trigger within the form panel
+	// body; lastFormView is the most recent rendered panel. Both are set in
+	// View and consumed by ComposeDropdownOverlay.
+	kindDDRow    int
+	lastFormView string
 }
 
 // fieldCount returns the total number of focusable items.
-// Indices: 0=kind, 1=name, 2=tags, 3..3+len*2-1=fields, addField, body, save, cancel
+// Indices: 0=kind, 1=name, 2=group, 3=tags, 4..4+len*2-1=fields, addField, body, save, cancel
 func (m *Model) fieldCount() int {
-	return 3 + len(m.fields)*2 + 1 + 1 + 2
+	return 4 + len(m.fields)*2 + 1 + 1 + 2
 }
 
-func (m *Model) focusIdxAddField() int { return 3 + len(m.fields)*2 }
+func (m *Model) focusIdxAddField() int { return 4 + len(m.fields)*2 }
 func (m *Model) focusIdxBody() int     { return m.focusIdxAddField() + 1 }
 func (m *Model) focusIdxSave() int     { return m.focusIdxBody() + 1 }
 func (m *Model) focusIdxCancel() int   { return m.focusIdxSave() + 1 }
@@ -72,6 +95,10 @@ func NewModel(zm *zone.Manager) Model {
 	name.Placeholder = "name"
 	name.CharLimit = 200
 
+	group := textinput.New()
+	group.Placeholder = "group (optional, e.g. my-project)"
+	group.CharLimit = 100
+
 	tags := textinput.New()
 	tags.Placeholder = "tags (comma-separated)"
 	tags.CharLimit = 500
@@ -80,13 +107,19 @@ func NewModel(zm *zone.Manager) Model {
 	body.Placeholder = "body / description"
 	body.CharLimit = 5000
 
-	return Model{
+	m := Model{
 		kind:        kind,
 		name:        name,
+		group:       group,
 		tags:        tags,
 		body:        body,
 		zoneManager: zm,
 	}
+	// Start with an empty kind dropdown (only the sentinel); SetKinds rebuilds
+	// it with the real kind set whenever the form is opened.
+	m.kindDD = buildKindDropdown(zm, nil)
+	m.setKind("")
+	return m
 }
 
 // Visible returns true if the form is visible.
@@ -113,11 +146,16 @@ func (m *Model) GetMode() Mode { return m.mode }
 
 // PopulateFrom fills the form from an entry.
 func (m *Model) PopulateFrom(e entry.Entry) {
-	m.kind.SetValue(e.Kind)
+	m.setKind(e.Kind)
 	m.name.SetValue(e.Name)
+	m.group.SetValue(e.Group)
 	m.tags.SetValue(strings.Join(e.Tags, ", "))
 	m.body.SetValue(e.Body)
 	m.sourceID = e.ID
+	m.sourceStatus = e.Status
+	m.sourceProposedBy = e.ProposedBy
+	m.sourceProposedAt = e.ProposedAt
+	m.sourceTargetID = e.TargetID
 	m.delivery = e.DeliveryOrDefault()
 
 	m.fields = nil
@@ -142,11 +180,17 @@ func (m *Model) SetProposalID(id string) { m.proposalID = id }
 // Reset clears all form fields.
 func (m *Model) Reset() {
 	m.kind.SetValue("")
+	m.newKindMode = false
 	m.name.SetValue("")
+	m.group.SetValue("")
 	m.tags.SetValue("")
 	m.body.SetValue("")
 	m.fields = nil
 	m.sourceID = ""
+	m.sourceStatus = ""
+	m.sourceProposedBy = ""
+	m.sourceProposedAt = nil
+	m.sourceTargetID = ""
 	m.proposalID = ""
 	m.delivery = entry.DeliveryInit
 	m.focusIdx = 0
@@ -155,11 +199,16 @@ func (m *Model) Reset() {
 // ToEntry converts the form fields into an Entry.
 func (m *Model) ToEntry() entry.Entry {
 	e := entry.Entry{
-		ID:       m.sourceID,
-		Kind:     strings.TrimSpace(m.kind.Value()),
-		Name:     strings.TrimSpace(m.name.Value()),
-		Body:     strings.TrimSpace(m.body.Value()),
-		Delivery: m.delivery,
+		ID:         m.sourceID,
+		Kind:       m.selectedKind(),
+		Name:       strings.TrimSpace(m.name.Value()),
+		Group:      strings.TrimSpace(m.group.Value()),
+		Body:       strings.TrimSpace(m.body.Value()),
+		Delivery:   m.delivery,
+		Status:     m.sourceStatus,
+		ProposedBy: m.sourceProposedBy,
+		ProposedAt: m.sourceProposedAt,
+		TargetID:   m.sourceTargetID,
 	}
 
 	rawTags := strings.Split(m.tags.Value(), ",")
@@ -200,6 +249,27 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 
+	// Kind dropdown result messages: apply the choice / close the panel.
+	switch msg.(type) {
+	case bubbledropdown.ItemChosenMsg:
+		return m.handleKindChosen(msg)
+	case bubbledropdown.ItemCanceledMsg:
+		if m.kindDD != nil {
+			m.kindDD, _ = m.kindDD.Update(msg)
+		}
+		m.syncKindFocus()
+		return m, nil
+	}
+
+	// While the Kind panel is open, route all key/mouse events to it.
+	if m.kindDD != nil && m.kindDD.Open() {
+		switch msg.(type) {
+		case tea.KeyMsg, tea.MouseMsg:
+			m.kindDD, cmd = m.kindDD.Update(msg)
+			return m, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -232,6 +302,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		// A click on the Kind trigger opens the dropdown (even from new-kind
+		// mode, so the user can switch back to an existing kind).
+		if m.kindDD != nil && m.zoneManager.Get(kindDDZone).InBounds(msg) {
+			m.kindDD, cmd = m.kindDD.Update(msg)
+			return m, cmd
+		}
 		if m.zoneManager.Get("form:save").InBounds(msg) {
 			e := m.ToEntry()
 			pid := m.proposalID
@@ -258,13 +334,22 @@ func (m Model) updateFocusedField(msg tea.KeyMsg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focusIdx {
 	case 0:
-		m.kind, cmd = m.kind.Update(msg)
+		// Index 0 is the Kind selector: the text input while typing a new
+		// kind, otherwise the dropdown (which opens on Enter/Space and cycles
+		// on ↑/↓ while focused).
+		if m.newKindMode {
+			m.kind, cmd = m.kind.Update(msg)
+		} else if m.kindDD != nil {
+			m.kindDD, cmd = m.kindDD.Update(msg)
+		}
 	case 1:
 		m.name, cmd = m.name.Update(msg)
 	case 2:
+		m.group, cmd = m.group.Update(msg)
+	case 3:
 		m.tags, cmd = m.tags.Update(msg)
 	default:
-		fieldBase := 3
+		fieldBase := 4
 		for i := range m.fields {
 			keyIdx := fieldBase + i*2
 			valIdx := keyIdx + 1
@@ -289,13 +374,20 @@ func (m *Model) applyFocus() {
 	m.blurAll()
 	switch m.focusIdx {
 	case 0:
-		m.kind.Focus()
+		// Only the text input takes keyboard focus directly; the dropdown's
+		// focused state is set by syncKindFocus.
+		if m.newKindMode {
+			m.kind.Focus()
+		}
+		m.syncKindFocus()
 	case 1:
 		m.name.Focus()
 	case 2:
+		m.group.Focus()
+	case 3:
 		m.tags.Focus()
 	default:
-		fieldBase := 3
+		fieldBase := 4
 		for i := range m.fields {
 			keyIdx := fieldBase + i*2
 			valIdx := keyIdx + 1
@@ -316,8 +408,12 @@ func (m *Model) applyFocus() {
 
 // blurAll blurs all inputs.
 func (m *Model) blurAll() {
+	if m.kindDD != nil {
+		m.kindDD.SetFocused(false)
+	}
 	m.kind.Blur()
 	m.name.Blur()
+	m.group.Blur()
 	m.tags.Blur()
 	m.body.Blur()
 	for i := range m.fields {
@@ -337,7 +433,7 @@ func (m *Model) addField() {
 	vInput.CharLimit = 1000
 
 	m.fields = append(m.fields, FieldPair{Key: kInput, Val: vInput})
-	m.focusIdx = 3 + (len(m.fields)-1)*2
+	m.focusIdx = 4 + (len(m.fields)-1)*2
 	m.applyFocus()
 }
 

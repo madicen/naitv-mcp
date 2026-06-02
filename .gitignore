@@ -1,0 +1,11 @@
+# jj (Jujutsu) version control
+.jj/
+
+# jj-tui local config
+.jj-tui.json
+
+# macOS
+.DS_Store
+
+# VSCode
+.vscode

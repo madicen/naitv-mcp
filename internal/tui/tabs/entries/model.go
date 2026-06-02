@@ -2,14 +2,32 @@ package entries
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
+	bubbledropdown "github.com/madicen/bubble-dropdown"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
+
+// itemKind distinguishes rows in the flat display list.
+type itemKind int
+
+const (
+	itemKindHeader itemKind = iota // collapsible group header row
+	itemKindEntry                  // regular entry row
+)
+
+// listItem is one row in the flattened entry list.
+type listItem struct {
+	kind      itemKind
+	groupName string      // group this item belongs to (empty = General)
+	count     int         // for header items: total entries in the group
+	e         entry.Entry // for entry items
+}
 
 // Request is returned from Update to signal actions the root model should handle.
 type Request struct {
@@ -19,6 +37,7 @@ type Request struct {
 	ConfirmDelete  bool
 	ToggleDelivery bool
 	SwitchToReview bool
+	CopyBody       bool
 	SwitchKind     string
 	SwitchKindSet  bool // true even when SwitchKind == "" (all)
 }
@@ -37,6 +56,18 @@ type Model struct {
 	viewport          viewport.Model
 	showConfirmDelete bool
 	deleteTargetID    string
+
+	// Group-collapse state.
+	collapsed map[string]bool // group name → collapsed
+	flatItems []listItem      // rebuilt by buildFlatItems after every data change
+
+	// kindDD is the kind-filter dropdown (replaces the old pill row).
+	kindDD *bubbledropdown.Dropdown
+	// contentTop is the absolute terminal row where the entries content begins
+	// (the tab-bar height). Mouse events are translated by this offset before
+	// reaching an open dropdown's geometric hit-test, since the dropdown panel
+	// is composited in content-local coordinates inside View.
+	contentTop int
 }
 
 // NewModel creates a new entries Model.
@@ -51,6 +82,7 @@ func NewModel(zm *zone.Manager) Model {
 		zoneManager: zm,
 		searchInput: si,
 		viewport:    vp,
+		collapsed:   make(map[string]bool),
 	}
 }
 
@@ -64,13 +96,42 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	var cmd tea.Cmd
 	var req *Request
 
+	// Dropdown result messages first: apply the choice, close the panel, and
+	// (on a real selection) emit the kind-switch request.
+	switch dm := msg.(type) {
+	case bubbledropdown.ItemChosenMsg:
+		if m.kindDD != nil {
+			m.kindDD, _ = m.kindDD.Update(msg)
+		}
+		req = &Request{SwitchKind: m.kindAtIndex(dm.Index), SwitchKindSet: true}
+		return m, req, nil
+	case bubbledropdown.ItemCanceledMsg:
+		if m.kindDD != nil {
+			m.kindDD, _ = m.kindDD.Update(msg)
+		}
+		return m, nil, nil
+	}
+
+	// While the panel is open, route all key/mouse events to the dropdown
+	// (it owns its own list navigation and geometric hit-testing). Mouse Y is
+	// translated into content-local space first.
+	if m.kindDD != nil && m.kindDD.Open() {
+		switch mm := msg.(type) {
+		case tea.KeyMsg:
+			m.kindDD, cmd = m.kindDD.Update(mm)
+			return m, nil, cmd
+		case tea.MouseMsg:
+			mm.Y -= m.contentTop
+			m.kindDD, cmd = m.kindDD.Update(mm)
+			return m, nil, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case EntriesLoadedMsg:
 		m.entries = msg.Entries
 		m.kinds = msg.Kinds
-		if m.selectedIdx >= len(m.entries) {
-			m.selectedIdx = intMax(0, len(m.entries)-1)
-		}
+		m.buildFlatItems()
 		m.updateViewport()
 		return m, nil, nil
 
@@ -82,11 +143,9 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		}
 		m.entries = newEntries
-		if m.selectedIdx >= len(m.entries) {
-			m.selectedIdx = intMax(0, len(m.entries)-1)
-		}
 		m.showConfirmDelete = false
 		m.deleteTargetID = ""
+		m.buildFlatItems()
 		m.updateViewport()
 		return m, nil, nil
 
@@ -94,6 +153,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		m.entries = msg.Entries
 		m.searchQuery = msg.Query
 		m.selectedIdx = 0
+		m.buildFlatItems()
 		m.updateViewport()
 		return m, nil, nil
 
@@ -132,7 +192,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 
 		switch msg.String() {
 		case "j", "down":
-			if m.selectedIdx < len(m.entries)-1 {
+			if m.selectedIdx < len(m.flatItems)-1 {
 				m.selectedIdx++
 				m.updateViewport()
 			}
@@ -141,23 +201,35 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 				m.selectedIdx--
 				m.updateViewport()
 			}
+		case " ":
+			// Space on a group header toggles its collapse state.
+			if m.selectedIdx < len(m.flatItems) {
+				item := m.flatItems[m.selectedIdx]
+				if item.kind == itemKindHeader {
+					m.collapsed[item.groupName] = !m.collapsed[item.groupName]
+					m.buildFlatItems()
+					m.updateViewport()
+				}
+			}
 		case "n":
 			req = &Request{OpenNewForm: true}
 		case "e":
-			if len(m.entries) > 0 {
+			if m.SelectedEntry() != nil {
 				req = &Request{OpenEditForm: true}
 			}
 		case "d":
-			if len(m.entries) > 0 {
-				sel := m.SelectedEntry()
-				if sel != nil {
-					m.showConfirmDelete = true
-					m.deleteTargetID = sel.ID
-				}
+			sel := m.SelectedEntry()
+			if sel != nil {
+				m.showConfirmDelete = true
+				m.deleteTargetID = sel.ID
 			}
 		case "i":
-			if len(m.entries) > 0 {
+			if m.SelectedEntry() != nil {
 				req = &Request{ToggleDelivery: true}
+			}
+		case "c":
+			if m.SelectedEntry() != nil {
+				req = &Request{CopyBody: true}
 			}
 		case "/":
 			m.searchMode = true
@@ -165,49 +237,53 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		case "R":
 			req = &Request{SwitchToReview: true}
 		case "tab":
-			if len(m.kinds) > 0 {
-				if m.selectedKind == "" {
-					req = &Request{SwitchKind: m.kinds[0], SwitchKindSet: true}
-				} else {
-					found := false
-					for i, k := range m.kinds {
-						if k == m.selectedKind {
-							if i+1 < len(m.kinds) {
-								req = &Request{SwitchKind: m.kinds[i+1], SwitchKindSet: true}
-							} else {
-								req = &Request{SwitchKind: "", SwitchKindSet: true}
-							}
-							found = true
-							break
-						}
-					}
-					if !found {
-						req = &Request{SwitchKind: "", SwitchKindSet: true}
-					}
-				}
+			// Open the kind-filter dropdown. The dropdown opens on Enter when
+			// focused, so synthesize one (it is kept focused; see
+			// newKindDropdown). Return directly so the open command is not
+			// clobbered by the trailing viewport update.
+			if m.kindDD != nil {
+				m.kindDD.SetFocused(true)
+				m.kindDD, cmd = m.kindDD.Update(tea.KeyMsg{Type: tea.KeyEnter})
 			}
+			return m, nil, cmd
 		}
 
 	case tea.MouseMsg:
+		// Only act on release events so each physical click fires exactly once
+		// (Bubble Tea emits both Press and Release for every click).
+		if msg.Action != tea.MouseActionRelease {
+			m.viewport, cmd = m.viewport.Update(msg)
+			return m, nil, cmd
+		}
+
+		// A click on the kind-filter trigger opens the dropdown (the panel is
+		// then routed all events by the open-guard at the top of Update).
+		if m.kindDD != nil && m.zoneManager.Get(kindDDZone).InBounds(msg) {
+			m.kindDD, cmd = m.kindDD.Update(msg)
+			return m, nil, cmd
+		}
+
 		m.viewport, cmd = m.viewport.Update(msg)
 
 		if m.zoneManager.Get("action:new").InBounds(msg) {
 			req = &Request{OpenNewForm: true}
 		} else if m.zoneManager.Get("action:edit").InBounds(msg) {
-			if len(m.entries) > 0 {
+			if m.SelectedEntry() != nil {
 				req = &Request{OpenEditForm: true}
 			}
 		} else if m.zoneManager.Get("action:delete").InBounds(msg) {
-			if len(m.entries) > 0 {
-				sel := m.SelectedEntry()
-				if sel != nil {
-					m.showConfirmDelete = true
-					m.deleteTargetID = sel.ID
-				}
+			sel := m.SelectedEntry()
+			if sel != nil {
+				m.showConfirmDelete = true
+				m.deleteTargetID = sel.ID
 			}
 		} else if m.zoneManager.Get("action:delivery").InBounds(msg) {
-			if len(m.entries) > 0 {
+			if m.SelectedEntry() != nil {
 				req = &Request{ToggleDelivery: true}
+			}
+		} else if m.zoneManager.Get("action:copy").InBounds(msg) {
+			if m.SelectedEntry() != nil {
+				req = &Request{CopyBody: true}
 			}
 		} else if m.zoneManager.Get("action:search").InBounds(msg) {
 			m.searchMode = true
@@ -215,19 +291,16 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		} else if m.zoneManager.Get("action:review").InBounds(msg) {
 			req = &Request{SwitchToReview: true}
 		} else {
-			for i := range m.entries {
-				if m.zoneManager.Get(entryRowZone(i)).InBounds(msg) {
-					m.selectedIdx = i
+			for i, item := range m.flatItems {
+				if m.zoneManager.Get(flatItemZone(i)).InBounds(msg) {
+					if item.kind == itemKindHeader {
+						// Clicking a header toggles its group.
+						m.collapsed[item.groupName] = !m.collapsed[item.groupName]
+						m.buildFlatItems()
+					} else {
+						m.selectedIdx = i
+					}
 					m.updateViewport()
-					break
-				}
-			}
-			if m.zoneManager.Get("kind:").InBounds(msg) {
-				req = &Request{SwitchKind: "", SwitchKindSet: true}
-			}
-			for _, k := range m.kinds {
-				if m.zoneManager.Get("kind:"+k).InBounds(msg) {
-					req = &Request{SwitchKind: k, SwitchKindSet: true}
 					break
 				}
 			}
@@ -263,12 +336,17 @@ func (m *Model) SetDimensions(w, h int) {
 	m.updateViewport()
 }
 
-// SelectedEntry returns the currently selected entry or nil.
+// SelectedEntry returns the currently selected entry, or nil if the cursor is
+// on a group header or the list is empty.
 func (m *Model) SelectedEntry() *entry.Entry {
-	if len(m.entries) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.entries) {
+	if len(m.flatItems) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.flatItems) {
 		return nil
 	}
-	e := m.entries[m.selectedIdx]
+	item := m.flatItems[m.selectedIdx]
+	if item.kind != itemKindEntry {
+		return nil
+	}
+	e := item.e
 	return &e
 }
 
@@ -283,6 +361,21 @@ func (m *Model) SelectedKind() string {
 	return m.selectedKind
 }
 
+// Kinds returns the distinct kinds currently known to the entries tab.
+func (m *Model) Kinds() []string {
+	return m.kinds
+}
+
+// SetContentTop records the absolute terminal row where the entries content
+// begins (the tab-bar height). The root sets this so an open dropdown's mouse
+// hit-test lines up with the composited panel.
+func (m *Model) SetContentTop(top int) {
+	if top < 0 {
+		top = 0
+	}
+	m.contentTop = top
+}
+
 // DeleteTargetID returns the ID of the entry pending deletion.
 func (m *Model) DeleteTargetID() string {
 	return m.deleteTargetID
@@ -292,6 +385,95 @@ func (m *Model) DeleteTargetID() string {
 func (m *Model) SearchQuery() string {
 	return m.searchInput.Value()
 }
+
+// ── Grouping ──────────────────────────────────────────────────────────────────
+
+// groupFor returns the display group for an entry. Precedence:
+//  1. e.Group — explicitly set by the user or agent
+//  2. plugin name from e.ProposedBy ("plugin:X" → "X")
+//  3. "" — falls through to "General"
+func groupFor(e entry.Entry) string {
+	if e.Group != "" {
+		return e.Group
+	}
+	if strings.HasPrefix(e.ProposedBy, "plugin:") {
+		return strings.TrimPrefix(e.ProposedBy, "plugin:")
+	}
+	return ""
+}
+
+// buildFlatItems rebuilds the flat display list from m.entries and m.collapsed.
+// Group headers are only emitted when at least one plugin group exists;
+// otherwise the list stays flat (no headers) to preserve the simple experience
+// when no plugins are installed.
+func (m *Model) buildFlatItems() {
+	type groupData struct {
+		entries []entry.Entry
+	}
+
+	var order []string
+	groups := map[string]*groupData{}
+
+	for _, e := range m.entries {
+		g := groupFor(e)
+		if _, ok := groups[g]; !ok {
+			order = append(order, g)
+			groups[g] = &groupData{}
+		}
+		groups[g].entries = append(groups[g].entries, e)
+	}
+
+	// Sort: "" (General) first, then plugins alphabetically.
+	sort.Slice(order, func(i, j int) bool {
+		a, b := order[i], order[j]
+		if a == "" {
+			return true
+		}
+		if b == "" {
+			return false
+		}
+		return a < b
+	})
+
+	// Only emit group headers when at least one plugin group is present.
+	useHeaders := false
+	for _, g := range order {
+		if g != "" {
+			useHeaders = true
+			break
+		}
+	}
+
+	m.flatItems = make([]listItem, 0, len(m.entries)+len(order))
+	for _, gName := range order {
+		gd := groups[gName]
+		if useHeaders {
+			m.flatItems = append(m.flatItems, listItem{
+				kind:      itemKindHeader,
+				groupName: gName,
+				count:     len(gd.entries),
+			})
+		}
+		if !m.collapsed[gName] {
+			for _, e := range gd.entries {
+				m.flatItems = append(m.flatItems, listItem{
+					kind:      itemKindEntry,
+					groupName: gName,
+					e:         e,
+				})
+			}
+		}
+	}
+
+	// Clamp the cursor.
+	if l := len(m.flatItems); l == 0 {
+		m.selectedIdx = 0
+	} else if m.selectedIdx >= l {
+		m.selectedIdx = l - 1
+	}
+}
+
+// ── Internal helpers ──────────────────────────────────────────────────────────
 
 // updateViewport refreshes the viewport content.
 func (m *Model) updateViewport() {
@@ -327,8 +509,8 @@ func formatEntryDetail(e entry.Entry) string {
 	return sb.String()
 }
 
-func entryRowZone(i int) string {
-	return fmt.Sprintf("entry:%d", i)
+func flatItemZone(i int) string {
+	return fmt.Sprintf("flat:%d", i)
 }
 
 // deliveryLabel describes an entry's delivery mode for the detail pane.
@@ -337,11 +519,4 @@ func deliveryLabel(e entry.Entry) string {
 		return "on-demand (agent must ask for it directly)"
 	}
 	return "init (included in initialization bundle)"
-}
-
-func intMax(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

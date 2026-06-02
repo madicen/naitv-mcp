@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	zone "github.com/lrstanley/bubblezone"
+	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -183,7 +184,17 @@ func (m *Model) SetDimensions(w, h int) {
 	if contentH < 1 {
 		contentH = 1
 	}
-	m.viewport = viewport.New(detailW, contentH)
+	// The detail viewport lives inside the rounded pane (−2 cols/rows) and
+	// shares it with the inline action-button line (−1 row).
+	vpW := detailW - 2
+	if vpW < 1 {
+		vpW = 1
+	}
+	vpH := contentH - 3
+	if vpH < 1 {
+		vpH = 1
+	}
+	m.viewport = viewport.New(vpW, vpH)
 	m.updateViewport()
 }
 
@@ -218,6 +229,14 @@ func (m *Model) updateViewport() {
 // formatProposalDetail formats a proposal for the detail pane.
 func formatProposalDetail(p entry.Entry) string {
 	var sb strings.Builder
+
+	// Warn before anything else when the proposal would register a shell command.
+	if tools.IsExecutable(p) {
+		sb.WriteString("⚠  EXECUTABLE TOOL PROPOSAL\n")
+		sb.WriteString("   Approving this will register a shell command that runs\n")
+		sb.WriteString("   on the server when the model calls the tool. Review the\n")
+		sb.WriteString("   exec field carefully before approving.\n\n")
+	}
 
 	badge := "NEW"
 	if p.TargetID != "" {

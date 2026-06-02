@@ -25,6 +25,7 @@ type Entry struct {
 	ID         string
 	Kind       string
 	Name       string
+	Group      string            // user-defined display group (overrides plugin-based grouping in TUI)
 	Body       string
 	Tags       []string
 	Fields     map[string]string

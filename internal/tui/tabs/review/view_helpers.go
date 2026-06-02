@@ -104,11 +104,22 @@ func renderProposalList(m *Model, width, height int) string {
 	}
 
 	content := strings.Join(rows, "\n")
-	return stylePane.Width(width).Height(height).Render(content)
+	// Size the bordered box to the inner area; the rounded border adds the
+	// remaining 2 rows/cols so the pane occupies exactly width × height.
+	return stylePane.Width(innerW).Height(innerH).Render(content)
 }
 
 // renderProposalDetail renders the selected proposal detail in the right pane.
 func renderProposalDetail(m *Model, width, height int) string {
+	innerW := width - 2
+	if innerW < 1 {
+		innerW = 1
+	}
+	innerH := height - 2
+	if innerH < 1 {
+		innerH = 1
+	}
+
 	content := m.viewport.View()
 
 	// Inline action buttons — these are also in the detail text, but add zone marks here for mouse support
@@ -118,7 +129,9 @@ func renderProposalDetail(m *Model, width, height int) string {
 	buttons := lipgloss.JoinHorizontal(lipgloss.Top, approveBtn, rejectBtn, editBtn)
 
 	fullContent := content + "\n" + buttons
-	return stylePane.Width(width).Height(height).Render(fullContent)
+	// Size the bordered box to the inner area so the border doesn't push the
+	// pane past its allotted height (which previously hid the tab bar).
+	return stylePane.Width(innerW).Height(innerH).Render(fullContent)
 }
 
 // renderReviewActionBar renders the action buttons at the bottom.
