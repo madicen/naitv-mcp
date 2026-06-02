@@ -224,7 +224,7 @@ func formatProposalDetail(p entry.Entry) string {
 		badge = "UPD"
 	}
 
-	sb.WriteString(fmt.Sprintf("[%s] %s\n\n", badge, p.Name))
+	fmt.Fprintf(&sb, "[%s] %s\n\n", badge, p.Name)
 	sb.WriteString("Kind:  " + p.Kind + "\n")
 	sb.WriteString("ID:    " + p.ID + "\n")
 	if p.ProposedBy != "" {

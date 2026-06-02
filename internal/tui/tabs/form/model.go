@@ -268,10 +268,11 @@ func (m Model) updateFocusedField(msg tea.KeyMsg) (Model, tea.Cmd) {
 		for i := range m.fields {
 			keyIdx := fieldBase + i*2
 			valIdx := keyIdx + 1
-			if m.focusIdx == keyIdx {
+			switch m.focusIdx {
+			case keyIdx:
 				m.fields[i].Key, cmd = m.fields[i].Key.Update(msg)
 				return m, cmd
-			} else if m.focusIdx == valIdx {
+			case valIdx:
 				m.fields[i].Val, cmd = m.fields[i].Val.Update(msg)
 				return m, cmd
 			}
@@ -298,10 +299,11 @@ func (m *Model) applyFocus() {
 		for i := range m.fields {
 			keyIdx := fieldBase + i*2
 			valIdx := keyIdx + 1
-			if m.focusIdx == keyIdx {
+			switch m.focusIdx {
+			case keyIdx:
 				m.fields[i].Key.Focus()
 				return
-			} else if m.focusIdx == valIdx {
+			case valIdx:
 				m.fields[i].Val.Focus()
 				return
 			}

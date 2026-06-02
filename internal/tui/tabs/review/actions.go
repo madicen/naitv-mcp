@@ -24,7 +24,7 @@ func ApproveCmd(st *store.Store, id string) tea.Cmd {
 // RejectCmd rejects a pending proposal.
 func RejectCmd(st *store.Store, id string) tea.Cmd {
 	return func() tea.Msg {
-		st.Reject(id)
+		_ = st.Reject(id)
 		return ProposalRejectedMsg{ID: id}
 	}
 }

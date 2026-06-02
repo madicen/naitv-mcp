@@ -16,7 +16,6 @@ var (
 	styleBtn       = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Padding(0, 1).Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("39"))
 	styleBtnActive = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("39")).Padding(0, 1).Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("39"))
 	styleRemoveBtn = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Padding(0, 1)
-	styleAddBtn    = lipgloss.NewStyle().Foreground(lipgloss.Color("46")).Padding(0, 1)
 	styleDimLabel  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 

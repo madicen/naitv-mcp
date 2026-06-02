@@ -48,7 +48,9 @@ func main() {
 func runServer(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
 	dbPath := fs.String("db", store.DefaultDBPath(), "Path to SQLite database")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
@@ -62,7 +64,9 @@ func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ExitOnError)
 	dbPath := fs.String("db", store.DefaultDBPath(), "Path to SQLite database")
 	out := fs.String("out", "AGENTS.md", "Output file path. Use '-' to write to stdout.")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
@@ -94,7 +98,9 @@ func runTUI(args []string) error {
 	fs := flag.NewFlagSet("tui", flag.ExitOnError)
 	dbPath := fs.String("db", store.DefaultDBPath(), "Path to SQLite database")
 	demo := fs.Bool("demo", false, "Run with seeded demo data (for VHS recordings)")
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *demo {
 		if err := configureDemoEnv(); err != nil {
@@ -118,7 +124,9 @@ func runTUI(args []string) error {
 
 func runSeedDemo(args []string) error {
 	fs := flag.NewFlagSet("seed-demo", flag.ExitOnError)
-	fs.Parse(args)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	dbPath := store.DefaultDBPath()
 	st, err := store.Open(dbPath)
 	if err != nil {

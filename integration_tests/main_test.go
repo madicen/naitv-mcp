@@ -36,15 +36,6 @@ func updateModel(m *tui.Model, msg tea.Msg) *tui.Model {
 	return next.(*tui.Model)
 }
 
-func updateModelWithCmd(m *tui.Model, msg tea.Msg) *tui.Model {
-	next, cmd := m.Update(msg)
-	m = next.(*tui.Model)
-	if cmd != nil {
-		runCmds(m, cmd)
-	}
-	return m
-}
-
 func runPendingCmds(m *tui.Model, msg tea.Msg, maxRounds int) *tui.Model {
 	next, cmd := m.Update(msg)
 	m = next.(*tui.Model)
