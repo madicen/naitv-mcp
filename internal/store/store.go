@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS entries (
     id           TEXT PRIMARY KEY,
     kind         TEXT NOT NULL,
     name         TEXT NOT NULL,
+    grp          TEXT NOT NULL DEFAULT '',
     body         TEXT NOT NULL DEFAULT '',
     tags         TEXT NOT NULL DEFAULT '[]',
     fields       TEXT NOT NULL DEFAULT '{}',
@@ -101,6 +102,11 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add delivery column: %w", err)
 		}
 	}
+	if !hasColumn(db, "entries", "grp") {
+		if _, err := db.Exec(`ALTER TABLE entries ADD COLUMN grp TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add grp column: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -167,7 +173,7 @@ func scanEntry(row interface {
 	var status, delivery string
 
 	err := row.Scan(
-		&e.ID, &e.Kind, &e.Name, &e.Body,
+		&e.ID, &e.Kind, &e.Name, &e.Group, &e.Body,
 		&tagsJSON, &fieldsJSON,
 		&status, &delivery,
 		&e.ProposedBy, &proposedAt, &e.TargetID,
@@ -202,7 +208,7 @@ func scanEntry(row interface {
 	return e, nil
 }
 
-const selectCols = `SELECT id, kind, name, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at FROM entries`
+const selectCols = `SELECT id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at FROM entries`
 
 // List returns active entries, optionally filtered by kind and/or tags.
 // An empty kind means "all kinds". Tags is an AND filter.
@@ -283,7 +289,7 @@ func (s *Store) GetByName(name string) (entry.Entry, error) {
 // Search performs a full-text search over active entries.
 func (s *Store) Search(query string) ([]entry.Entry, error) {
 	q := `
-		SELECT e.id, e.kind, e.name, e.body, e.tags, e.fields, e.status, e.delivery,
+		SELECT e.id, e.kind, e.name, e.grp, e.body, e.tags, e.fields, e.status, e.delivery,
 		       e.proposed_by, e.proposed_at, e.target_id, e.created_at, e.updated_at
 		FROM entries_fts
 		JOIN entries e ON entries_fts.rowid = e.rowid
@@ -322,9 +328,9 @@ func (s *Store) Create(e entry.Entry) (entry.Entry, error) {
 	e.ProposedAt = nil
 
 	_, err := s.db.Exec(
-		`INSERT INTO entries (id, kind, name, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.Kind, e.Name, e.Body,
+		`INSERT INTO entries (id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.Kind, e.Name, e.Group, e.Body,
 		marshalTags(e.Tags), marshalFields(e.Fields),
 		string(e.Status), string(e.Delivery),
 		e.ProposedBy, nil, e.TargetID,
@@ -346,8 +352,8 @@ func (s *Store) Update(e entry.Entry) (entry.Entry, error) {
 	}
 
 	res, err := s.db.Exec(
-		`UPDATE entries SET kind=?, name=?, body=?, tags=?, fields=?, status=?, delivery=?, proposed_by=?, proposed_at=?, target_id=?, updated_at=? WHERE id=?`,
-		e.Kind, e.Name, e.Body,
+		`UPDATE entries SET kind=?, name=?, grp=?, body=?, tags=?, fields=?, status=?, delivery=?, proposed_by=?, proposed_at=?, target_id=?, updated_at=? WHERE id=?`,
+		e.Kind, e.Name, e.Group, e.Body,
 		marshalTags(e.Tags), marshalFields(e.Fields),
 		string(e.Status), string(e.DeliveryOrDefault()),
 		e.ProposedBy, proposedAt, e.TargetID,
@@ -407,9 +413,9 @@ func (s *Store) CreatePending(e entry.Entry) (entry.Entry, error) {
 	e.ProposedAt = &now
 
 	_, err := s.db.Exec(
-		`INSERT INTO entries (id, kind, name, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.Kind, e.Name, e.Body,
+		`INSERT INTO entries (id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		e.ID, e.Kind, e.Name, e.Group, e.Body,
 		marshalTags(e.Tags), marshalFields(e.Fields),
 		string(e.Status), string(e.Delivery),
 		e.ProposedBy, e.ProposedAt, e.TargetID,
@@ -502,6 +508,9 @@ func (s *Store) Approve(proposalID string) (entry.Entry, error) {
 	}
 	if proposal.Kind != "" {
 		target.Kind = proposal.Kind
+	}
+	if proposal.Group != "" {
+		target.Group = proposal.Group
 	}
 	if len(proposal.Tags) > 0 {
 		target.Tags = proposal.Tags

@@ -3,10 +3,12 @@ module github.com/madicen/naitv-mcp
 go 1.25.0
 
 require (
+	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbles v1.0.0
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/lrstanley/bubblezone v1.0.0
+	github.com/madicen/bubble-dropdown v0.0.4
 	github.com/madicen/bubble-overlay v0.0.0-20260528215458-97d5221a8fee
 	github.com/mark3labs/mcp-go v0.9.0
 	github.com/muesli/termenv v0.16.0
@@ -15,7 +17,6 @@ require (
 )
 
 require (
-	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/x/ansi v0.11.7 // indirect

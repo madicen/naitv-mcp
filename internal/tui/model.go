@@ -3,19 +3,23 @@ package tui
 import (
 	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	overlay "github.com/madicen/bubble-overlay"
 	zone "github.com/lrstanley/bubblezone"
+	bubbledropdown "github.com/madicen/bubble-dropdown"
+	overlay "github.com/madicen/bubble-overlay"
 	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/entries"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/form"
+	"github.com/madicen/naitv-mcp/internal/tui/tabs/plugins"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/review"
 )
 
 const (
 	tabEntries = 0
 	tabReview  = 1
+	tabPlugins = 2
 )
 
 var (
@@ -28,16 +32,17 @@ var (
 
 // Model is the root bubbletea model.
 type Model struct {
-	store        *store.Store
-	zoneManager  *zone.Manager
-	activeTab    int
-	entries      entries.Model
-	review       review.Model
-	form         form.Model
-	pendingCount int
+	store         *store.Store
+	zoneManager   *zone.Manager
+	activeTab     int
+	entries       entries.Model
+	review        review.Model
+	pluginsTab    plugins.Model
+	form          form.Model
+	pendingCount  int
 	width, height int
-	statusMsg    string
-	statusExpiry time.Time
+	statusMsg     string
+	statusExpiry  time.Time
 }
 
 // New creates a new root Model.
@@ -50,8 +55,13 @@ func New(st *store.Store) *Model {
 		activeTab:   tabEntries,
 		entries:     entries.NewModel(zm),
 		review:      review.NewModel(zm),
+		pluginsTab:  plugins.NewModel(zm),
 		form:        form.NewModel(zm),
 	}
+	// The entries content is drawn two rows below the top (tab bar + blank
+	// separator); tell the tab so its kind-filter dropdown's mouse hit-test
+	// lines up with the panel.
+	m.entries.SetContentTop(2)
 	return m
 }
 
@@ -85,10 +95,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		// Global quit
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
-			if !m.form.Visible() {
+			if !m.form.Visible() && !m.pluginsTab.InputActive() {
 				return m, tea.Quit
 			}
 		}
+
+	// ── Dropdown results ─────────────────────────────────────────────────────
+	// bubble-dropdown emits these as commands on a later tick; route them to
+	// whichever surface owns an open dropdown (the form modal takes priority).
+
+	case bubbledropdown.ItemChosenMsg, bubbledropdown.ItemCanceledMsg:
+		if m.form.Visible() {
+			newForm, cmd := m.form.Update(msg)
+			m.form = newForm
+			return m, cmd
+		}
+		if m.activeTab == tabEntries {
+			newEntries, req, cmd := m.entries.Update(msg)
+			m.entries = newEntries
+			cmds = append(cmds, cmd)
+			if req != nil {
+				cmds = append(cmds, m.handleEntriesRequest(req))
+			}
+		}
+		return m, tea.Batch(cmds...)
+
+	// ── Entries tab messages ─────────────────────────────────────────────────
 
 	case entries.EntriesLoadedMsg:
 		newEntries, req, cmd := m.entries.Update(msg)
@@ -106,7 +138,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if req != nil {
 			cmds = append(cmds, m.handleEntriesRequest(req))
 		}
-		// Reload to get fresh kinds
 		cmds = append(cmds, entries.LoadEntriesCmd(m.store, m.entries.SelectedKind()))
 		return m, tea.Batch(cmds...)
 
@@ -118,6 +149,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.handleEntriesRequest(req))
 		}
 		return m, tea.Batch(cmds...)
+
+	// ── Review tab messages ──────────────────────────────────────────────────
 
 	case review.ProposalsLoadedMsg:
 		newReview, req, cmd := m.review.Update(msg)
@@ -163,12 +196,59 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("All proposals approved.")
 		return m, tea.Batch(cmds...)
 
+	// ── Plugins tab messages ─────────────────────────────────────────────────
+
+	case plugins.PluginsLoadedMsg:
+		newPlugins, req, cmd := m.pluginsTab.Update(msg)
+		m.pluginsTab = newPlugins
+		cmds = append(cmds, cmd)
+		if req != nil {
+			cmds = append(cmds, m.handlePluginsRequest(req))
+		}
+		return m, tea.Batch(cmds...)
+
+	case plugins.RegistryLoadedMsg:
+		newPlugins, req, cmd := m.pluginsTab.Update(msg)
+		m.pluginsTab = newPlugins
+		cmds = append(cmds, cmd)
+		if req != nil {
+			cmds = append(cmds, m.handlePluginsRequest(req))
+		}
+		return m, tea.Batch(cmds...)
+
+	case plugins.PluginInstalledMsg:
+		newPlugins, req, cmd := m.pluginsTab.Update(msg)
+		m.pluginsTab = newPlugins
+		cmds = append(cmds, cmd)
+		if req != nil {
+			cmds = append(cmds, m.handlePluginsRequest(req))
+		}
+		// After install, reload the installed list and pending count.
+		cmds = append(cmds, plugins.LoadPluginsCmd(m.store))
+		return m, tea.Batch(cmds...)
+
+	case plugins.PluginUninstalledMsg:
+		newPlugins, req, cmd := m.pluginsTab.Update(msg)
+		m.pluginsTab = newPlugins
+		cmds = append(cmds, cmd)
+		if req != nil {
+			cmds = append(cmds, m.handlePluginsRequest(req))
+		}
+		cmds = append(cmds, plugins.LoadPluginsCmd(m.store))
+		return m, tea.Batch(cmds...)
+
+	case plugins.ReloadInstalledMsg:
+		cmds = append(cmds, plugins.LoadPluginsCmd(m.store))
+		return m, tea.Batch(cmds...)
+
+	// ── Misc ─────────────────────────────────────────────────────────────────
+
 	case pendingCountMsg:
 		m.pendingCount = msg.count
 		return m, nil
 	}
 
-	// If form is visible, route to form
+	// If form is visible, route to form.
 	if m.form.Visible() {
 		newForm, cmd := m.form.Update(msg)
 		m.form = newForm
@@ -176,7 +256,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 	}
 
-	// Check tab bar zone clicks
+	// Check tab bar zone clicks.
 	if mouseMsg, ok := msg.(tea.MouseMsg); ok {
 		if m.zoneManager.Get("tab:entries").InBounds(mouseMsg) {
 			m.activeTab = tabEntries
@@ -187,9 +267,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, review.LoadProposalsCmd(m.store))
 			return m, tea.Batch(cmds...)
 		}
+		if m.zoneManager.Get("tab:plugins").InBounds(mouseMsg) {
+			m.activeTab = tabPlugins
+			cmds = append(cmds, plugins.LoadPluginsCmd(m.store))
+			return m, tea.Batch(cmds...)
+		}
 	}
 
-	// Route to active tab
+	// Route key/mouse to active tab.
 	switch m.activeTab {
 	case tabEntries:
 		newEntries, req, cmd := m.entries.Update(msg)
@@ -204,6 +289,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		if req != nil {
 			cmds = append(cmds, m.handleReviewRequest(req))
+		}
+	case tabPlugins:
+		newPlugins, req, cmd := m.pluginsTab.Update(msg)
+		m.pluginsTab = newPlugins
+		cmds = append(cmds, cmd)
+		if req != nil {
+			cmds = append(cmds, m.handlePluginsRequest(req))
 		}
 	}
 
@@ -220,6 +312,8 @@ func (m *Model) View() string {
 		content = m.entries.View()
 	case tabReview:
 		content = m.review.View()
+	case tabPlugins:
+		content = m.pluginsTab.View()
 	default:
 		content = m.entries.View()
 	}
@@ -229,22 +323,28 @@ func (m *Model) View() string {
 		status = "\n" + styleStatus.Render(m.statusMsg)
 	}
 
-	mainView := tabBar + "\n" + content + status
+	// One blank line separates the tab bar from the active tab's content.
+	mainView := tabBar + "\n\n" + content + status
 
 	if m.form.Visible() {
 		formView := m.form.View()
 		mainView = overlay.OverlayViewInCenter(mainView, formView, m.width, m.height)
+		// Composite the form's open Kind dropdown panel after centering, using
+		// absolute bounds the form derives from the centered origin.
+		mainView = m.form.ComposeDropdownOverlay(mainView, m.width, m.height)
 	}
 
 	return m.zoneManager.Scan(mainView)
 }
 
-// SetDimensions updates dimensions for all child models.
+// SetDimensions updates dimensions for all child models. Tabs receive h-2: one
+// row for the tab bar and one for the blank separator line below it (see View).
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	m.entries.SetDimensions(w, h-1)
-	m.review.SetDimensions(w, h-1)
+	m.entries.SetDimensions(w, h-2)
+	m.review.SetDimensions(w, h-2)
+	m.pluginsTab.SetDimensions(w, h-2)
 	m.form.SetDimensions(w, h)
 }
 
@@ -255,17 +355,21 @@ func (m *Model) renderTabBar() string {
 	if m.pendingCount > 0 {
 		reviewLabel = reviewLabel + " " + styleBadge.Render("("+itoa(m.pendingCount)+")")
 	}
+	pluginsLabel := "Plugins"
 
-	var entriesTab, reviewTab string
-	if m.activeTab == tabEntries {
-		entriesTab = m.zoneManager.Mark("tab:entries", styleTabActive.Render(entriesLabel))
-		reviewTab = m.zoneManager.Mark("tab:review", styleTabInactive.Render(reviewLabel))
-	} else {
-		entriesTab = m.zoneManager.Mark("tab:entries", styleTabInactive.Render(entriesLabel))
-		reviewTab = m.zoneManager.Mark("tab:review", styleTabActive.Render(reviewLabel))
+	render := func(label, zone string, active bool) string {
+		style := styleTabInactive
+		if active {
+			style = styleTabActive
+		}
+		return m.zoneManager.Mark(zone, style.Render(label))
 	}
 
-	return styleTabBar.Render(lipgloss.JoinHorizontal(lipgloss.Top, entriesTab, reviewTab))
+	entriesTab := render(entriesLabel, "tab:entries", m.activeTab == tabEntries)
+	reviewTab := render(reviewLabel, "tab:review", m.activeTab == tabReview)
+	pluginsTab := render(pluginsLabel, "tab:plugins", m.activeTab == tabPlugins)
+
+	return styleTabBar.Render(lipgloss.JoinHorizontal(lipgloss.Top, entriesTab, reviewTab, pluginsTab))
 }
 
 // handleEntriesRequest processes requests from the entries tab.
@@ -278,38 +382,48 @@ func (m *Model) handleEntriesRequest(req *entries.Request) tea.Cmd {
 	if req.OpenNewForm {
 		m.form.Reset()
 		m.form.SetMode(form.ModeCreate)
+		m.form.SetKinds(m.entries.Kinds())
 		m.form.Show()
 	}
-
 	if req.OpenEditForm {
 		sel := m.entries.SelectedEntry()
 		if sel != nil {
 			m.form.Reset()
 			m.form.SetMode(form.ModeEdit)
+			m.form.SetKinds(m.entries.Kinds())
 			m.form.PopulateFrom(*sel)
 			m.form.Show()
 		}
 	}
-
 	if req.ConfirmDelete {
 		id := m.entries.DeleteTargetID()
 		if id != "" {
 			cmds = append(cmds, entries.DeleteEntryCmd(m.store, id))
 		}
 	}
-
 	if req.ToggleDelivery {
 		sel := m.entries.SelectedEntry()
 		if sel != nil {
 			cmds = append(cmds, entries.ToggleDeliveryCmd(m.store, sel.ID, m.entries.SelectedKind()))
 		}
 	}
-
+	if req.CopyBody {
+		sel := m.entries.SelectedEntry()
+		switch {
+		case sel == nil:
+			m.setStatus("Nothing to copy")
+		case sel.Body == "":
+			m.setStatus("Entry has no body to copy")
+		case clipboard.WriteAll(sel.Body) != nil:
+			m.setStatus("Failed to copy to clipboard")
+		default:
+			m.setStatus("Copied body of \"" + sel.Name + "\" to clipboard")
+		}
+	}
 	if req.SwitchToReview {
 		m.activeTab = tabReview
 		cmds = append(cmds, review.LoadProposalsCmd(m.store))
 	}
-
 	if req.SwitchKindSet {
 		m.entries.SetSelectedKind(req.SwitchKind)
 		cmds = append(cmds, entries.LoadEntriesCmd(m.store, req.SwitchKind))
@@ -328,34 +442,54 @@ func (m *Model) handleReviewRequest(req *review.Request) tea.Cmd {
 	if req.SwitchToEntries {
 		m.activeTab = tabEntries
 	}
-
 	if req.ApproveSelected {
 		id := m.review.SelectedID()
 		if id != "" {
 			cmds = append(cmds, review.ApproveCmd(m.store, id))
 		}
 	}
-
 	if req.RejectSelected {
 		id := m.review.SelectedID()
 		if id != "" {
 			cmds = append(cmds, review.RejectCmd(m.store, id))
 		}
 	}
-
 	if req.EditSelected {
 		sel := m.review.SelectedProposal()
 		if sel != nil {
 			m.form.Reset()
 			m.form.SetMode(form.ModeEditProposal)
+			m.form.SetKinds(m.entries.Kinds())
 			m.form.PopulateFrom(*sel)
 			m.form.SetProposalID(sel.ID)
 			m.form.Show()
 		}
 	}
-
 	if req.ApproveAll {
 		cmds = append(cmds, review.ApproveAllCmd(m.store))
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// handlePluginsRequest processes requests from the plugins tab.
+func (m *Model) handlePluginsRequest(req *plugins.Request) tea.Cmd {
+	if req == nil {
+		return nil
+	}
+	var cmds []tea.Cmd
+
+	if req.Install {
+		cmds = append(cmds, plugins.InstallPluginCmd(m.store, req.Source))
+	}
+	if req.Uninstall {
+		cmds = append(cmds, plugins.UninstallPluginCmd(m.store, req.Name))
+	}
+	if req.FetchRegistry {
+		cmds = append(cmds, plugins.FetchRegistryCmd())
+	}
+	if req.RefreshPendingCount {
+		cmds = append(cmds, m.loadPendingCount())
 	}
 
 	return tea.Batch(cmds...)
@@ -378,7 +512,6 @@ func (m *Model) handleSave(msg form.SaveMsg) tea.Cmd {
 		}
 		cmds = append(cmds, entries.LoadEntriesCmd(m.store, m.entries.SelectedKind()))
 	case form.ModeEditProposal:
-		// Update the entry first (store.Update the proposal fields)
 		_, err := m.store.Update(msg.E)
 		if err == nil && msg.ProposalID != "" {
 			_, _ = m.store.Approve(msg.ProposalID)

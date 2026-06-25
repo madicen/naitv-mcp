@@ -43,6 +43,7 @@ func (m *Model) View() string {
 	}
 	m.kind.Width = inputTextW
 	m.name.Width = inputTextW
+	m.group.Width = inputTextW
 	m.tags.Width = inputTextW
 	m.body.Width = inputTextW
 
@@ -74,35 +75,51 @@ func (m *Model) View() string {
 	lines = append(lines, styleTitle.Render(title))
 	lines = append(lines, "")
 
-	// Kind field
-	lines = append(lines, renderField("Kind", m.kind.View(), m.focusIdx == 0, formW))
+	// Kind field: a dropdown of existing kinds plus a "+ New kind…" sentinel.
+	// Record the trigger's content-line index so ComposeDropdownOverlay can
+	// position the panel. When in new-kind mode, a text input is revealed
+	// directly below the trigger.
+	m.kindDDRow = len(lines)
+	if m.kindDD != nil {
+		trigger := m.zoneManager.Mark(kindDDZone, m.kindDD.TriggerView())
+		kindRow := lipgloss.JoinHorizontal(lipgloss.Center, styleLabel.Render("Kind:"), trigger)
+		lines = append(lines, kindRow)
+		if m.newKindMode {
+			lines = append(lines, renderField("New kind", m.kind.View(), m.focusIdx == 0, formW))
+		}
+	} else {
+		lines = append(lines, renderField("Kind", m.kind.View(), m.focusIdx == 0, formW))
+	}
 
 	// Name field
 	lines = append(lines, renderField("Name", m.name.View(), m.focusIdx == 1, formW))
 
+	// Group field
+	lines = append(lines, renderField("Group", m.group.View(), m.focusIdx == 2, formW))
+
 	// Tags field
-	lines = append(lines, renderField("Tags", m.tags.View(), m.focusIdx == 2, formW))
+	lines = append(lines, renderField("Tags", m.tags.View(), m.focusIdx == 3, formW))
 
 	// Custom fields
 	if len(m.fields) > 0 {
 		lines = append(lines, styleDimLabel.Render("Custom Fields:"))
 		for i, fp := range m.fields {
-			keyFocused := m.focusIdx == 3+i*2
-			valFocused := m.focusIdx == 3+i*2+1
+			keyFocused := m.focusIdx == 4+i*2
+			valFocused := m.focusIdx == 4+i*2+1
 
 			keyView := fp.Key.View()
 			valView := fp.Val.View()
 
 			var keyBox, valBox string
 			if keyFocused {
-				keyBox = styleFocused.Width(formW/3).Render(keyView)
+				keyBox = styleFocused.Width(formW / 3).Render(keyView)
 			} else {
-				keyBox = styleInputBox.Width(formW/3).Render(keyView)
+				keyBox = styleInputBox.Width(formW / 3).Render(keyView)
 			}
 			if valFocused {
-				valBox = styleFocused.Width(formW/2).Render(valView)
+				valBox = styleFocused.Width(formW / 2).Render(valView)
 			} else {
-				valBox = styleInputBox.Width(formW/2).Render(valView)
+				valBox = styleInputBox.Width(formW / 2).Render(valView)
 			}
 
 			removeID := fmt.Sprintf("form:remove-field:%d", i)
@@ -131,7 +148,9 @@ func (m *Model) View() string {
 	lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, saveBtn, "  ", cancelBtn))
 
 	content := strings.Join(lines, "\n")
-	return styleFormPanel.Width(formW).Render(content)
+	rendered := styleFormPanel.Width(formW).Render(content)
+	m.lastFormView = rendered
+	return rendered
 }
 
 // renderField renders a labeled input field.
