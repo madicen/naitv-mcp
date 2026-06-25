@@ -18,10 +18,8 @@ var (
 	styleDetail     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
 	styleList       = lipgloss.NewStyle().Padding(0, 1)
 	styleStatus     = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-	styleErr        = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 	styleDim        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	styleBadge      = lipgloss.NewStyle().Foreground(lipgloss.Color("34")).Bold(true)  // green "installed"
-	styleExec       = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))             // amber ⚡
+	styleBadge      = lipgloss.NewStyle().Foreground(lipgloss.Color("34")).Bold(true) // green "installed"
 	styleKey        = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
 	styleHint       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
