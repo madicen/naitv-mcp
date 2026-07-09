@@ -3,14 +3,14 @@ package integration_tests
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/entries"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/review"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
 // TestJourney_MouseEntryRowClick simulates a mouse click event on the entries
-// tab by delivering a tea.MouseMsg. Verifies the model handles it without panic.
+// tab by delivering a tea.MouseClickMsg. Verifies the model handles it without panic.
 func TestJourney_MouseEntryRowClick(t *testing.T) {
 	st := newTestDB(t)
 
@@ -24,16 +24,15 @@ func TestJourney_MouseEntryRowClick(t *testing.T) {
 	m = updateModel(m, loaded)
 
 	// Simulate a left-click mouse event in the entries area.
-	mouseMsg := tea.MouseMsg{
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionRelease,
+	mouseMsg := tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      20,
 		Y:      5,
 	}
 	m = updateModel(m, mouseMsg)
 
 	// Should not panic; view should still render.
-	view := m.View()
+	view := m.View().Content
 	if view == "" {
 		t.Error("expected non-empty view after mouse click")
 	}
@@ -61,25 +60,23 @@ func TestJourney_MouseReviewActions(t *testing.T) {
 	m = updateModel(m, loaded)
 
 	// Simulate a click on the "tab:review" area (approximate coords).
-	mouseMsg := tea.MouseMsg{
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionRelease,
+	mouseMsg := tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      30,
 		Y:      0,
 	}
 	m = updateModel(m, mouseMsg)
 
 	// Simulate a click in the content area (approximate approve button region).
-	mouseMsg2 := tea.MouseMsg{
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionRelease,
+	mouseMsg2 := tea.MouseClickMsg{
+		Button: tea.MouseLeft,
 		X:      60,
 		Y:      15,
 	}
 	m = updateModel(m, mouseMsg2)
 
 	// Verify model still renderable.
-	view := m.View()
+	view := m.View().Content
 	if view == "" {
 		t.Error("expected non-empty view after mouse interactions")
 	}

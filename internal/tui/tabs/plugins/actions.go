@@ -1,7 +1,7 @@
 package plugins
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
 	"github.com/madicen/naitv-mcp/internal/store"
 )

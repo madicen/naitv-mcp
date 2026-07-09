@@ -3,7 +3,7 @@ package entries
 import (
 	"sort"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )

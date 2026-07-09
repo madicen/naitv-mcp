@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/entries"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -42,7 +42,7 @@ func TestJourney_CreateEntry(t *testing.T) {
 		t.Error("expected new-repo in store after create")
 	}
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "new-repo") {
 		t.Errorf("expected new-repo in view, got:\n%s", view)
 	}
@@ -122,7 +122,7 @@ func TestJourney_FormFieldAddRemove(t *testing.T) {
 	m = runPendingCmds(m, key("n"), 3)
 
 	// The form should now be visible — view should not be empty.
-	view := m.View()
+	view := m.View().Content
 	if view == "" {
 		t.Error("expected non-empty view after pressing n")
 	}
@@ -131,5 +131,5 @@ func TestJourney_FormFieldAddRemove(t *testing.T) {
 	m = runPendingCmds(m, keyType(tea.KeyEsc), 3)
 
 	// Form should be hidden now.
-	_ = m.View()
+	_ = m.View().Content
 }

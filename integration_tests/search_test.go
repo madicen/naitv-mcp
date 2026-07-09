@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/entries"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -42,7 +42,7 @@ func TestJourney_SearchEntries(t *testing.T) {
 	}
 	m = updateModel(m, searchMsg)
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "searchable-repo") {
 		t.Errorf("expected searchable-repo in view after search, got:\n%s", view)
 	}
@@ -54,7 +54,7 @@ func TestJourney_SearchEntries(t *testing.T) {
 	loaded = entries.LoadEntriesCmd(st, "")()
 	m = updateModel(m, loaded)
 
-	view = m.View()
+	view = m.View().Content
 	// View should contain both entries now (or at least not crash).
 	_ = view
 }

@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/fang/v2"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/madicen/naitv-mcp/internal/instructions"
 	"github.com/madicen/naitv-mcp/internal/mcp"
 	"github.com/madicen/naitv-mcp/internal/store"
@@ -141,13 +141,13 @@ func runTUI(dbPath string, demo bool) error {
 	defer st.Close()
 
 	m := tui.New(st)
-	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	prog := tea.NewProgram(m)
 	_, err = prog.Run()
 	return err
 }
 
 func configureDemoEnv() error {
-	lipgloss.SetColorProfile(termenv.TrueColor)
+	lipgloss.Writer.Profile = colorprofile.TrueColor
 
 	demoRoot := os.Getenv("NAITV_MCP_DEMO_DIR")
 	if demoRoot == "" {

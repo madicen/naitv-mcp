@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -31,7 +31,7 @@ type Model struct {
 
 // NewModel creates a new review Model.
 func NewModel(zm *zone.Manager) Model {
-	vp := viewport.New(0, 0)
+	vp := viewport.New(viewport.WithWidth(0), viewport.WithHeight(0))
 	return Model{
 		zoneManager: zm,
 		viewport:    vp,
@@ -95,7 +95,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		m.SetDimensions(msg.Width, msg.Height)
 		return m, nil, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "j", "down":
 			if m.selectedIdx < len(m.proposals)-1 {
@@ -127,9 +127,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			req = &Request{SwitchToEntries: true}
 		}
 
-	case tea.MouseMsg:
-		m.viewport, cmd = m.viewport.Update(msg)
-
+	case tea.MouseClickMsg:
 		if m.zoneManager.Get("action:approve").InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveSelected: true}
@@ -168,6 +166,10 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		}
 		return m, req, cmd
+
+	case tea.MouseWheelMsg:
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, req, cmd
 	}
 
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -194,7 +196,7 @@ func (m *Model) SetDimensions(w, h int) {
 	if vpH < 1 {
 		vpH = 1
 	}
-	m.viewport = viewport.New(vpW, vpH)
+	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	m.updateViewport()
 }
 

@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -70,7 +70,7 @@ func NewModel(zm *zone.Manager) Model {
 	inp := textinput.New()
 	inp.Placeholder = "plugin name, URL, or ./path/to/plugin.json"
 	inp.CharLimit = 512
-	inp.Width = 52
+	inp.SetWidth(52)
 
 	return Model{
 		zoneManager:    zm,
@@ -149,7 +149,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 
 	// ── Input mode (custom install source) ──────────────────────────────────
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.inputActive {
 			switch msg.String() {
 			case "esc":
@@ -268,7 +268,7 @@ func (m *Model) SetDimensions(w, h int) {
 	if vpH < 1 {
 		vpH = 1
 	}
-	m.viewport = viewport.New(vpW, vpH)
+	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	m.updateViewport()
 }
 

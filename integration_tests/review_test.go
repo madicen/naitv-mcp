@@ -56,7 +56,7 @@ func TestJourney_AgentProposeNew(t *testing.T) {
 	// Reload entries in model and check view.
 	entriesLoaded := entries.LoadEntriesCmd(st, "")()
 	m = updateModel(m, entriesLoaded)
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "agent-proposed-repo") {
 		t.Errorf("expected agent-proposed-repo in view, got:\n%s", view)
 	}
@@ -101,7 +101,7 @@ func TestJourney_AgentProposeUpdate(t *testing.T) {
 	m := newTestModel(t, st)
 	approveMsg := review.ProposalApprovedMsg{Entry: updated}
 	m = updateModel(m, approveMsg)
-	_ = m.View()
+	_ = m.View().Content
 }
 
 // TestJourney_EditBeforeApprove selects a proposal in review, simulates edit
@@ -158,7 +158,7 @@ func TestJourney_EditBeforeApprove(t *testing.T) {
 		t.Error("expected edit-before-approve entry in active list")
 	}
 
-	_ = m.View()
+	_ = m.View().Content
 }
 
 // TestJourney_RejectProposal creates a pending proposal, rejects it, and
@@ -202,7 +202,7 @@ func TestJourney_RejectProposal(t *testing.T) {
 		}
 	}
 
-	_ = m.View()
+	_ = m.View().Content
 }
 
 // TestJourney_ApproveAll creates 3 pending proposals, approves all via store,
@@ -253,5 +253,5 @@ func TestJourney_ApproveAll(t *testing.T) {
 	// Reload entries and check view.
 	entriesLoaded := entries.LoadEntriesCmd(st, "")()
 	m = updateModel(m, entriesLoaded)
-	_ = m.View()
+	_ = m.View().Content
 }

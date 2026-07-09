@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -62,7 +62,7 @@ type Model struct {
 	flatItems []listItem      // rebuilt by buildFlatItems after every data change
 
 	// kindDD is the kind-filter dropdown (replaces the old pill row).
-	kindDD *bubbledropdown.Dropdown
+	kindDD *dropdownv2.Dropdown
 	// contentTop is the absolute terminal row where the entries content begins
 	// (the tab-bar height). Mouse events are translated by this offset before
 	// reaching an open dropdown's geometric hit-test, since the dropdown panel
@@ -76,7 +76,7 @@ func NewModel(zm *zone.Manager) Model {
 	si.Placeholder = "Search..."
 	si.CharLimit = 200
 
-	vp := viewport.New(0, 0)
+	vp := viewport.New(viewport.WithWidth(0), viewport.WithHeight(0))
 
 	return Model{
 		zoneManager: zm,
@@ -99,13 +99,13 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	// Dropdown result messages first: apply the choice, close the panel, and
 	// (on a real selection) emit the kind-switch request.
 	switch dm := msg.(type) {
-	case bubbledropdown.ItemChosenMsg:
+	case dropdownv2.ItemChosenMsg:
 		if m.kindDD != nil {
 			m.kindDD, _ = m.kindDD.Update(msg)
 		}
 		req = &Request{SwitchKind: m.kindAtIndex(dm.Index), SwitchKindSet: true}
 		return m, req, nil
-	case bubbledropdown.ItemCanceledMsg:
+	case dropdownv2.ItemCanceledMsg:
 		if m.kindDD != nil {
 			m.kindDD, _ = m.kindDD.Update(msg)
 		}
@@ -117,10 +117,18 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	// translated into content-local space first.
 	if m.kindDD != nil && m.kindDD.Open() {
 		switch mm := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			m.kindDD, cmd = m.kindDD.Update(mm)
 			return m, nil, cmd
-		case tea.MouseMsg:
+		case tea.MouseClickMsg:
+			mm.Y -= m.contentTop
+			m.kindDD, cmd = m.kindDD.Update(mm)
+			return m, nil, cmd
+		case tea.MouseMotionMsg:
+			mm.Y -= m.contentTop
+			m.kindDD, cmd = m.kindDD.Update(mm)
+			return m, nil, cmd
+		case tea.MouseWheelMsg:
 			mm.Y -= m.contentTop
 			m.kindDD, cmd = m.kindDD.Update(mm)
 			return m, nil, cmd
@@ -161,7 +169,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		m.SetDimensions(msg.Width, msg.Height)
 		return m, nil, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.showConfirmDelete {
 			switch msg.String() {
 			case "y", "enter":
@@ -243,27 +251,18 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			// clobbered by the trailing viewport update.
 			if m.kindDD != nil {
 				m.kindDD.SetFocused(true)
-				m.kindDD, cmd = m.kindDD.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				m.kindDD, cmd = m.kindDD.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			}
 			return m, nil, cmd
 		}
 
-	case tea.MouseMsg:
-		// Only act on release events so each physical click fires exactly once
-		// (Bubble Tea emits both Press and Release for every click).
-		if msg.Action != tea.MouseActionRelease {
-			m.viewport, cmd = m.viewport.Update(msg)
-			return m, nil, cmd
-		}
-
+	case tea.MouseClickMsg:
 		// A click on the kind-filter trigger opens the dropdown (the panel is
 		// then routed all events by the open-guard at the top of Update).
 		if m.kindDD != nil && m.zoneManager.Get(kindDDZone).InBounds(msg) {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 			return m, nil, cmd
 		}
-
-		m.viewport, cmd = m.viewport.Update(msg)
 
 		if m.zoneManager.Get("action:new").InBounds(msg) {
 			req = &Request{OpenNewForm: true}
@@ -306,6 +305,10 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		}
 		return m, req, cmd
+
+	case tea.MouseWheelMsg:
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, nil, cmd
 	}
 
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -332,7 +335,7 @@ func (m *Model) SetDimensions(w, h int) {
 	if vpH < 1 {
 		vpH = 1
 	}
-	m.viewport = viewport.New(vpW, vpH)
+	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	m.updateViewport()
 }
 

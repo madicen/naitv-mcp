@@ -3,8 +3,8 @@ package form
 import (
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	tea "charm.land/bubbletea/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -81,7 +81,7 @@ func TestChooseSentinelEntersNewKindMode(t *testing.T) {
 	m := NewModel(nil)
 	m.SetKinds([]string{"fact", "rule"})
 	// The sentinel is the last option index (== len(ddKinds)).
-	m, _ = m.handleKindChosen(bubbledropdown.ItemChosenMsg{Index: len(m.ddKinds)})
+	m, _ = m.handleKindChosen(dropdownv2.ItemChosenMsg{Index: len(m.ddKinds)})
 	if !m.newKindMode {
 		t.Fatalf("choosing the sentinel should enable new-kind mode")
 	}
@@ -99,14 +99,14 @@ func TestChooseExistingViaUpdate(t *testing.T) {
 	m.Show() // visible, focus on the Kind dropdown
 
 	// Open the panel.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if !m.kindDD.Open() {
 		t.Fatalf("Enter on the focused trigger should open the panel")
 	}
 	// Move cursor to the second option ("Rule") and confirm.
-	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	var cmd tea.Cmd
-	m, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd == nil {
 		t.Fatalf("confirming an option should emit a command")
 	}

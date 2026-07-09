@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )

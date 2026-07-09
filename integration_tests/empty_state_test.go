@@ -17,7 +17,7 @@ func TestJourney_EmptyState(t *testing.T) {
 	loaded := entries.LoadEntriesCmd(st, "")()
 	m = updateModel(m, loaded)
 
-	view := m.View()
+	view := m.View().Content
 	if view == "" {
 		t.Error("expected non-empty view even with empty DB")
 	}

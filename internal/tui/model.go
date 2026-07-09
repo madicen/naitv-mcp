@@ -3,11 +3,10 @@ package tui
 import (
 	"time"
 
-	"github.com/atotto/clipboard"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	zone "github.com/lrstanley/bubblezone"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	overlay "github.com/madicen/bubble-overlay"
 	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/entries"
@@ -92,7 +91,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.SetDimensions(msg.Width, msg.Height)
 		return m, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		// Global quit
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
 			if !m.form.Visible() && !m.pluginsTab.InputActive() {
@@ -104,7 +103,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// bubble-dropdown emits these as commands on a later tick; route them to
 	// whichever surface owns an open dropdown (the form modal takes priority).
 
-	case bubbledropdown.ItemChosenMsg, bubbledropdown.ItemCanceledMsg:
+	case dropdownv2.ItemChosenMsg, dropdownv2.ItemCanceledMsg:
 		if m.form.Visible() {
 			newForm, cmd := m.form.Update(msg)
 			m.form = newForm
@@ -257,17 +256,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Check tab bar zone clicks.
-	if mouseMsg, ok := msg.(tea.MouseMsg); ok {
-		if m.zoneManager.Get("tab:entries").InBounds(mouseMsg) {
+	if clickMsg, ok := msg.(tea.MouseClickMsg); ok {
+		if m.zoneManager.Get("tab:entries").InBounds(clickMsg) {
 			m.activeTab = tabEntries
 			return m, nil
 		}
-		if m.zoneManager.Get("tab:review").InBounds(mouseMsg) {
+		if m.zoneManager.Get("tab:review").InBounds(clickMsg) {
 			m.activeTab = tabReview
 			cmds = append(cmds, review.LoadProposalsCmd(m.store))
 			return m, tea.Batch(cmds...)
 		}
-		if m.zoneManager.Get("tab:plugins").InBounds(mouseMsg) {
+		if m.zoneManager.Get("tab:plugins").InBounds(clickMsg) {
 			m.activeTab = tabPlugins
 			cmds = append(cmds, plugins.LoadPluginsCmd(m.store))
 			return m, tea.Batch(cmds...)
@@ -303,7 +302,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // View renders the full TUI.
-func (m *Model) View() string {
+func (m *Model) View() tea.View {
 	tabBar := m.renderTabBar()
 	var content string
 
@@ -334,7 +333,10 @@ func (m *Model) View() string {
 		mainView = m.form.ComposeDropdownOverlay(mainView, m.width, m.height)
 	}
 
-	return m.zoneManager.Scan(mainView)
+	v := tea.NewView(m.zoneManager.Scan(mainView))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
 
 // SetDimensions updates dimensions for all child models. Tabs receive h-2: one
@@ -414,10 +416,9 @@ func (m *Model) handleEntriesRequest(req *entries.Request) tea.Cmd {
 			m.setStatus("Nothing to copy")
 		case sel.Body == "":
 			m.setStatus("Entry has no body to copy")
-		case clipboard.WriteAll(sel.Body) != nil:
-			m.setStatus("Failed to copy to clipboard")
 		default:
 			m.setStatus("Copied body of \"" + sel.Name + "\" to clipboard")
+			cmds = append(cmds, tea.SetClipboard(sel.Body))
 		}
 	}
 	if req.SwitchToReview {

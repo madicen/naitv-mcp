@@ -3,8 +3,8 @@ package entries
 import (
 	"strings"
 
-	zone "github.com/lrstanley/bubblezone"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	zone "github.com/lrstanley/bubblezone/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 )
 
@@ -41,7 +41,7 @@ func displayKind(k string) string {
 // by each non-empty kind (capitalized for display). The selection is derived
 // from selectedKind, and the trigger is kept focused so its accent arrow shows
 // and Enter/Space (or a synthesized Enter on Tab) opens it.
-func newKindDropdown(zm *zone.Manager, kinds []string, selectedKind string) *bubbledropdown.Dropdown {
+func newKindDropdown(zm *zone.Manager, kinds []string, selectedKind string) *dropdownv2.Dropdown {
 	filtered := filterKinds(kinds)
 
 	opts := make([]string, 0, len(filtered)+1)
@@ -60,11 +60,11 @@ func newKindDropdown(zm *zone.Manager, kinds []string, selectedKind string) *bub
 		}
 	}
 
-	d := bubbledropdown.New(
-		bubbledropdown.WithOptions(opts),
-		bubbledropdown.WithInitialIndex(idx),
-		bubbledropdown.WithPlaceholder(kindFilterAll),
-		bubbledropdown.WithAccentColor(theme.Accent),
+	d := dropdownv2.New(
+		dropdownv2.WithOptions(opts),
+		dropdownv2.WithInitialIndex(idx),
+		dropdownv2.WithPlaceholder(kindFilterAll),
+		dropdownv2.WithAccentColor(theme.Accent),
 	)
 	d.SetZoneManager(zm)
 	d.SetFocused(true)

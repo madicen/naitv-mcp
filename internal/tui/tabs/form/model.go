@@ -5,10 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -63,7 +63,7 @@ type Model struct {
 	// "+ New kind…" sentinel. When newKindMode is set the kind textinput is
 	// revealed for free-text entry. kinds is the raw set; ddKinds is the
 	// non-empty subset used for the option-index ↔ kind mapping.
-	kindDD      *bubbledropdown.Dropdown
+	kindDD      *dropdownv2.Dropdown
 	kinds       []string
 	ddKinds     []string
 	newKindMode bool
@@ -251,9 +251,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	// Kind dropdown result messages: apply the choice / close the panel.
 	switch msg.(type) {
-	case bubbledropdown.ItemChosenMsg:
+	case dropdownv2.ItemChosenMsg:
 		return m.handleKindChosen(msg)
-	case bubbledropdown.ItemCanceledMsg:
+	case dropdownv2.ItemCanceledMsg:
 		if m.kindDD != nil {
 			m.kindDD, _ = m.kindDD.Update(msg)
 		}
@@ -264,14 +264,14 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	// While the Kind panel is open, route all key/mouse events to it.
 	if m.kindDD != nil && m.kindDD.Open() {
 		switch msg.(type) {
-		case tea.KeyMsg, tea.MouseMsg:
+		case tea.KeyPressMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseWheelMsg:
 			m.kindDD, cmd = m.kindDD.Update(msg)
 			return m, cmd
 		}
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "ctrl+s":
 			e := m.ToEntry()
@@ -301,7 +301,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m, cmd = m.updateFocusedField(msg)
 		}
 
-	case tea.MouseMsg:
+	case tea.MouseClickMsg:
 		// A click on the Kind trigger opens the dropdown (even from new-kind
 		// mode, so the user can switch back to an existing kind).
 		if m.kindDD != nil && m.zoneManager.Get(kindDDZone).InBounds(msg) {
@@ -330,7 +330,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // updateFocusedField routes the key message to the focused input.
-func (m Model) updateFocusedField(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) updateFocusedField(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focusIdx {
 	case 0:

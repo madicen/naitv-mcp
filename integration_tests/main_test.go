@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/internal/tui"
 )
@@ -61,10 +61,13 @@ func runCmds(m *tui.Model, cmd tea.Cmd) {
 	_, _ = m.Update(msg)
 }
 
-func key(s string) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
+func key(s string) tea.KeyPressMsg {
+	if len(s) == 1 {
+		return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
+	}
+	return tea.KeyPressMsg{Text: s}
 }
 
-func keyType(t tea.KeyType) tea.KeyMsg {
-	return tea.KeyMsg{Type: t}
+func keyType(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
 }

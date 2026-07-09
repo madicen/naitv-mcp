@@ -3,9 +3,9 @@ package form
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	tea "charm.land/bubbletea/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	overlay "github.com/madicen/bubble-overlay"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 )
@@ -44,17 +44,17 @@ func displayKind(k string) string {
 
 // buildKindDropdown builds the Kind dropdown: each existing (non-empty) kind
 // followed by the "+ New kind…" sentinel.
-func buildKindDropdown(zm *zone.Manager, ddKinds []string) *bubbledropdown.Dropdown {
+func buildKindDropdown(zm *zone.Manager, ddKinds []string) *dropdownv2.Dropdown {
 	opts := make([]string, 0, len(ddKinds)+1)
 	for _, k := range ddKinds {
 		opts = append(opts, displayKind(k))
 	}
 	opts = append(opts, newKindOption)
 
-	d := bubbledropdown.New(
-		bubbledropdown.WithOptions(opts),
-		bubbledropdown.WithPlaceholder("kind"),
-		bubbledropdown.WithAccentColor(theme.Accent),
+	d := dropdownv2.New(
+		dropdownv2.WithOptions(opts),
+		dropdownv2.WithPlaceholder("kind"),
+		dropdownv2.WithAccentColor(theme.Accent),
 	)
 	d.SetZoneManager(zm)
 	return d
@@ -135,7 +135,7 @@ func (m *Model) syncKindFocus() {
 // handleKindChosen applies an ItemChosenMsg: the sentinel enters new-kind mode
 // (focusing the text input); any other option selects that kind.
 func (m Model) handleKindChosen(msg tea.Msg) (Model, tea.Cmd) {
-	cm, _ := msg.(bubbledropdown.ItemChosenMsg)
+	cm, _ := msg.(dropdownv2.ItemChosenMsg)
 	if m.kindDD != nil {
 		m.kindDD, _ = m.kindDD.Update(msg)
 	}

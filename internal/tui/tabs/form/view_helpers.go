@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 var (
@@ -41,11 +41,11 @@ func (m *Model) View() string {
 	if inputTextW < 8 {
 		inputTextW = 8
 	}
-	m.kind.Width = inputTextW
-	m.name.Width = inputTextW
-	m.group.Width = inputTextW
-	m.tags.Width = inputTextW
-	m.body.Width = inputTextW
+	m.kind.SetWidth(inputTextW)
+	m.name.SetWidth(inputTextW)
+	m.group.SetWidth(inputTextW)
+	m.tags.SetWidth(inputTextW)
+	m.body.SetWidth(inputTextW)
 
 	// Custom field key/value boxes use formW/3 and formW/2 respectively, each
 	// with Padding(0,1) → two fewer text cells.
@@ -58,8 +58,8 @@ func (m *Model) View() string {
 		valTextW = 6
 	}
 	for i := range m.fields {
-		m.fields[i].Key.Width = keyTextW
-		m.fields[i].Val.Width = valTextW
+		m.fields[i].Key.SetWidth(keyTextW)
+		m.fields[i].Val.SetWidth(valTextW)
 	}
 
 	var lines []string
