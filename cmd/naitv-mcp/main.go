@@ -1,11 +1,12 @@
 package main
 
 import (
-	"flag"
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 
+	"charm.land/fang/v2"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
@@ -14,61 +15,92 @@ import (
 	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/internal/tui"
 	"github.com/madicen/naitv-mcp/pkg/entry"
+	"github.com/spf13/cobra"
 )
 
 func main() {
-	if len(os.Args) >= 2 {
-		switch os.Args[1] {
-		case "serve":
-			if err := runServer(os.Args[2:]); err != nil {
-				fmt.Fprintf(os.Stderr, "naitv-mcp: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "seed-demo":
-			if err := runSeedDemo(os.Args[2:]); err != nil {
-				fmt.Fprintf(os.Stderr, "naitv-mcp: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		case "init":
-			if err := runInit(os.Args[2:]); err != nil {
-				fmt.Fprintf(os.Stderr, "naitv-mcp: %v\n", err)
-				os.Exit(1)
-			}
-			return
-		}
-	}
-	if err := runTUI(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "naitv-mcp: %v\n", err)
+	root := newRootCmd()
+	if err := fang.Execute(context.Background(), root); err != nil {
 		os.Exit(1)
 	}
 }
 
-func runServer(args []string) error {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	dbPath := fs.String("db", store.DefaultDBPath(), "Path to SQLite database")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+func newRootCmd() *cobra.Command {
+	var demo bool
 
-	st, err := store.Open(*dbPath)
-	if err != nil {
-		return fmt.Errorf("open store: %w", err)
+	root := &cobra.Command{
+		Use:   "naitv-mcp",
+		Short: "Local MCP server and TUI for managing AI agent context",
+		Long:  "Browse, curate, and serve context entries to MCP clients. Run without a subcommand to open the TUI.",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dbPath, err := cmd.Flags().GetString("db")
+			if err != nil {
+				return err
+			}
+			return runTUI(dbPath, demo)
+		},
 	}
-	defer st.Close()
-	return mcp.Run(st)
+	root.Version = mcp.Version
+	root.Flags().BoolVar(&demo, "demo", false, "Run with seeded demo data (for VHS recordings)")
+	root.PersistentFlags().String("db", store.DefaultDBPath(), "Path to SQLite database")
+
+	root.AddCommand(newServeCmd(), newInitCmd(), newSeedDemoCmd())
+	return root
 }
 
-func runInit(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ExitOnError)
-	dbPath := fs.String("db", store.DefaultDBPath(), "Path to SQLite database")
-	out := fs.String("out", "AGENTS.md", "Output file path. Use '-' to write to stdout.")
-	if err := fs.Parse(args); err != nil {
-		return err
+func newServeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "serve",
+		Short: "Run the MCP server over stdio",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dbPath, err := cmd.Flags().GetString("db")
+			if err != nil {
+				return err
+			}
+			st, err := store.Open(dbPath)
+			if err != nil {
+				return fmt.Errorf("open store: %w", err)
+			}
+			defer st.Close()
+			return mcp.Run(st)
+		},
 	}
+}
 
-	st, err := store.Open(*dbPath)
+func newInitCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Write the initialization bundle to a file",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dbPath, err := cmd.Flags().GetString("db")
+			if err != nil {
+				return err
+			}
+			return runInit(dbPath, out)
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "AGENTS.md", "Output file path. Use '-' to write to stdout.")
+	return cmd
+}
+
+func newSeedDemoCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "seed-demo",
+		Short: "Populate the default database with demo data if empty",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := store.Open(store.DefaultDBPath())
+			if err != nil {
+				return err
+			}
+			defer st.Close()
+			return seedDemoDB(st)
+		},
+	}
+}
+
+func runInit(dbPath, out string) error {
+	st, err := store.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -82,35 +114,27 @@ func runInit(args []string) error {
 	initEntries := instructions.FilterInit(entries)
 	doc := instructions.Render(initEntries)
 
-	if *out == "-" {
+	if out == "-" {
 		fmt.Print(doc)
 		return nil
 	}
 
-	if err := os.WriteFile(*out, []byte(doc), 0o644); err != nil {
-		return fmt.Errorf("write %s: %w", *out, err)
+	if err := os.WriteFile(out, []byte(doc), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", out, err)
 	}
-	fmt.Fprintf(os.Stderr, "Wrote %d of %d entries (init delivery) to %s\n", len(initEntries), len(entries), *out)
+	fmt.Fprintf(os.Stderr, "Wrote %d of %d entries (init delivery) to %s\n", len(initEntries), len(entries), out)
 	return nil
 }
 
-func runTUI(args []string) error {
-	fs := flag.NewFlagSet("tui", flag.ExitOnError)
-	dbPath := fs.String("db", store.DefaultDBPath(), "Path to SQLite database")
-	demo := fs.Bool("demo", false, "Run with seeded demo data (for VHS recordings)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	if *demo {
+func runTUI(dbPath string, demo bool) error {
+	if demo {
 		if err := configureDemoEnv(); err != nil {
 			return fmt.Errorf("demo setup: %w", err)
 		}
-		// Refresh dbPath after env mutation
-		*dbPath = store.DefaultDBPath()
+		dbPath = store.DefaultDBPath()
 	}
 
-	st, err := store.Open(*dbPath)
+	st, err := store.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -120,20 +144,6 @@ func runTUI(args []string) error {
 	prog := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = prog.Run()
 	return err
-}
-
-func runSeedDemo(args []string) error {
-	fs := flag.NewFlagSet("seed-demo", flag.ExitOnError)
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	dbPath := store.DefaultDBPath()
-	st, err := store.Open(dbPath)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	return seedDemoDB(st)
 }
 
 func configureDemoEnv() error {
@@ -160,7 +170,6 @@ func configureDemoEnv() error {
 }
 
 func seedDemoDB(st *store.Store) error {
-	// Check if already seeded (idempotent)
 	existing, _ := st.List("", nil)
 	if len(existing) > 0 {
 		return nil
@@ -183,7 +192,6 @@ func seedDemoDB(st *store.Store) error {
 		}
 	}
 
-	// Pending proposals so Review tab has content
 	pending := []entry.Entry{
 		{Kind: "repo", Name: "naitv-mcp", Body: "Local MCP server + TUI for managing agent context.", Tags: []string{"go", "personal", "mcp"}, Fields: map[string]string{"path": "~/Documents/GitHub/naitv-mcp", "lang": "go"}, ProposedBy: "claude"},
 		{Kind: "workflow", Name: "incident-response", Body: "Page on-call via PagerDuty.\nCreate incident Slack channel.\nPost updates every 30 min.", ProposedBy: "claude"},
