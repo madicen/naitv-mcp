@@ -18,7 +18,7 @@ You decide which is which, per entry, from the TUI.
 ## Features
 
 - **MCP server** (`naitv-mcp serve`): exposes your context to any MCP client over stdio.
-- **Terminal UI** (`naitv-mcp`): browse, search, create, edit, delete, and review entries with keyboard + mouse.
+- **Terminal UI** (`naitv-mcp`): browse, search, create, edit, delete, review entries, and manage plugins with keyboard + mouse.
 - **Human-in-the-loop**: agents can only *read* active entries and *propose* writes; proposals queue as `pending` until you approve them in the **Review** tab.
 - **Initialization bundle**: the `initialize` tool and `naitv-mcp init` render your entries into a single instruction document (e.g. `AGENTS.md`).
 - **Per-entry delivery**: mark each entry `init` (in the bundle) or `on-demand` (fetched directly) with one keystroke.
@@ -151,8 +151,17 @@ naitv-mcp seed-demo    # idempotent; populates the default DB if empty
 | `search_entries` | Full-text search over active entries (`query`). |
 | `add_entry` | Propose a new entry (queued as `pending` for review). |
 | `update_entry` | Propose an update to an existing active entry (queued as `pending`). |
+| `list_tools` | List active executable tool entries (`kind=tool` with an `exec` field). |
+| `install_plugin` | Install a plugin from URL, path, or registry name (proposals queued for review). |
+| `list_plugins` | List installed plugins with version and entry count. |
+| `list_available_plugins` | Fetch plugins from the public registry (or a custom `registry_url`). |
+| `uninstall_plugin` | Remove a plugin and all of its entries. |
+| `set_project` | Update `working_dir` on all active executable tools to a project root. |
+| `generate_continue_config` | Generate a `.continue/config.yaml` wired to this server. |
 
 Write tools never modify active data directly — they always create a proposal you approve in the TUI.
+
+**Dynamic executable tools:** any active `kind=tool` entry with an `exec` field is also registered as an MCP tool (named after the entry). Agents can call these after you approve them in the Review tab; restart `naitv-mcp serve` to pick up newly approved tools.
 
 ## Keyboard reference
 
@@ -192,6 +201,18 @@ Write tools never modify active data directly — they always create a proposal 
 
 Most actions are also clickable via the on-screen buttons and tabs.
 
+### Plugins tab
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move selection |
+| `i` | Install selected plugin (browse mode) or enter custom install URL |
+| `u` | Uninstall selected plugin (installed mode) |
+| `tab` | Switch between Installed and Browse views |
+| `r` | Refresh the plugin registry |
+
+Browse the public plugin registry, install plugins (entries land in Review for approval), and uninstall installed plugins.
+
 ## Configuration
 
 | Setting | Default | Override |
@@ -210,7 +231,10 @@ naitv-mcp/
 │   ├── mcp/server.go           # MCP tool definitions & handlers
 │   ├── instructions/           # renders entries → initialization document
 │   ├── store/store.go          # SQLite CRUD + FTS + approval workflow
-│   └── tui/                    # Bubble Tea models (entries, review, form)
+│   ├── tools/                  # executable tool defs + sh -c runner
+│   ├── plugin/                 # JSON manifest install/uninstall
+│   ├── setup/                  # set_project, continue config helpers
+│   └── tui/                    # Bubble Tea models (entries, review, plugins, form)
 ├── pkg/entry/entry.go          # Entry domain type
 ├── integration_tests/          # end-to-end TUI journeys
 ├── vhs/                        # VHS tapes for screenshots
