@@ -5,8 +5,9 @@ import "time"
 type Status string
 
 const (
-	StatusActive  Status = "active"
-	StatusPending Status = "pending"
+	StatusActive   Status = "active"
+	StatusPending  Status = "pending"
+	StatusArchived Status = "archived"
 )
 
 // Delivery controls how an entry is surfaced to agents.
