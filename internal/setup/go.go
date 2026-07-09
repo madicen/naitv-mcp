@@ -74,7 +74,7 @@ func SetProject(st *store.Store, projectDir string, enableLint, disableLint bool
 // executable tool names to document in comments. binaryPath is the absolute
 // path to the naitv-mcp binary (use os.Executable() at call site).
 func ContinueConfig(toolNames []string, binaryPath string) string {
-	toolList := "  # (no executable tools registered yet — call setup first)"
+	toolList := "  # (no executable tools registered yet — install a plugin or add tool entries)"
 	if len(toolNames) > 0 {
 		lines := make([]string, len(toolNames))
 		for i, n := range toolNames {
@@ -122,12 +122,12 @@ systemMessage: |
 
 # ── Slash commands ─────────────────────────────────────────────────────────────
 # customCommands:
-#   - name: setup
-#     description: Set up naitv-mcp for this Go project
+#   - name: setup-project
+#     description: Point naitv-mcp tools at this project
 #     prompt: |
-#       Call the setup tool from naitv-mcp with stack="go" and the current project
-#       directory as project_dir. Then call generate_continue_config and show me
-#       the result so I can save it as .continue/config.yaml.
+#       Call install_plugin with source="loop-engineering-go" (or another plugin),
+#       then set_project with the current project directory, then generate_continue_config
+#       and show me the result so I can save it as .continue/config.yaml.
 #
 #   - name: reinit
 #     description: Reload naitv-mcp standing instructions
