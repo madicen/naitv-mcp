@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -71,8 +72,19 @@ func TestStore_CRUD(t *testing.T) {
 	if err := s.Delete(e.ID); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if _, err := s.Get(e.ID); err == nil {
-		t.Error("expected error after delete, got nil")
+	got, err = s.Get(e.ID)
+	if err != nil {
+		t.Fatalf("Get after delete: %v", err)
+	}
+	if got.Status != entry.StatusArchived {
+		t.Errorf("expected archived after delete, got %s", got.Status)
+	}
+	all, err := s.List("", nil)
+	if err != nil {
+		t.Fatalf("List after delete: %v", err)
+	}
+	if len(all) != 0 {
+		t.Errorf("expected 0 active entries after delete, got %d", len(all))
 	}
 }
 
@@ -346,7 +358,8 @@ func TestStore_ApproveAll(t *testing.T) {
 	s := openTestStore(t)
 
 	for i := 0; i < 3; i++ {
-		_, _ = s.CreatePending(entry.Entry{Kind: "note", Name: "pending", Body: "body"})
+		name := fmt.Sprintf("pending-%d", i)
+		_, _ = s.CreatePending(entry.Entry{Kind: "note", Name: name, Body: "body"})
 	}
 
 	count, err := s.PendingCount()
