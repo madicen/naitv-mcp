@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/components/kinddropdown"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -117,7 +118,7 @@ func NewModel(zm *zone.Manager) Model {
 	}
 	// Start with an empty kind dropdown (only the sentinel); SetKinds rebuilds
 	// it with the real kind set whenever the form is opened.
-	m.kindDD = buildKindDropdown(zm, nil)
+	m.kindDD = kinddropdown.BuildForm(zm, nil)
 	m.setKind("")
 	return m
 }
