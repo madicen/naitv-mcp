@@ -2,6 +2,7 @@ package mcp_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -308,6 +309,49 @@ func TestServer_SearchEntriesErrorPath(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Fatal("expected error for missing query")
+	}
+}
+
+func TestServer_SetProjectAndExport(t *testing.T) {
+	st := openTestStore(t)
+	if _, err := st.Create(entry.Entry{
+		Kind: "tool", Name: "build", Body: "build project",
+		Fields: map[string]string{"exec": "true", "working_dir": "/old"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	session, ctx := connectTestClient(t, st)
+
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "set_project",
+		Arguments: map[string]any{"project_dir": t.TempDir()},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("set_project: %v %#v", err, res)
+	}
+	got, err := st.GetByName("build")
+	if err != nil || got.Fields["working_dir"] == "/old" {
+		t.Fatalf("working_dir not updated: %#v, %v", got, err)
+	}
+}
+
+func TestServer_ListAvailablePluginsLocalRegistry(t *testing.T) {
+	st := openTestStore(t)
+	session, ctx := connectTestClient(t, st)
+	regPath := filepath.Join(t.TempDir(), "registry.json")
+	if err := os.WriteFile(regPath, []byte(`{"plugins":[{"name":"demo","version":"1.0.0","url":"file:///x","description":"d"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "list_available_plugins",
+		Arguments: map[string]any{"registry_url": regPath},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("list_available_plugins: %v", err)
+	}
+	text := res.Content[0].(*sdkmcp.TextContent).Text
+	if !contains(text, "demo") {
+		t.Fatalf("missing demo: %s", text)
 	}
 }
 

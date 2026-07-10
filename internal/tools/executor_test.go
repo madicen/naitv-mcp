@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -51,5 +53,37 @@ func TestParseDef_EnvAllowlist(t *testing.T) {
 	}
 	if len(def.EnvAllowlist) != 2 || def.EnvAllowlist[0] != "PATH" || def.EnvAllowlist[1] != "CUSTOM" {
 		t.Fatalf("EnvAllowlist = %#v", def.EnvAllowlist)
+	}
+}
+
+func TestRun_DisabledAndEcho(t *testing.T) {
+	disabled := Run(context.Background(), Def{Name: "x", Disabled: true}, nil)
+	if disabled.Error == "" {
+		t.Fatal("expected disabled error")
+	}
+	got := Run(context.Background(), Def{Name: "echo", Exec: "echo hello", Timeout: 5 * time.Second}, nil)
+	if got.Error != "" {
+		t.Fatalf("run error: %s", got.Error)
+	}
+	if !strings.Contains(got.Stdout, "hello") {
+		t.Fatalf("stdout = %q", got.Stdout)
+	}
+}
+
+func TestResultFormat(t *testing.T) {
+	text := Result{
+		Stdout:   "ok",
+		Stderr:   "warn",
+		ExitCode: 2,
+		Duration: 1500 * time.Millisecond,
+	}.Format()
+	for _, want := range []string{"ok", "stderr:", "warn", "exit code: 2", "completed in"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in %q", want, text)
+		}
+	}
+	errText := Result{Error: "boom"}.Format()
+	if !strings.Contains(errText, "error: boom") {
+		t.Fatalf("error format = %q", errText)
 	}
 }

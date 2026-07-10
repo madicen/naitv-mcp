@@ -20,7 +20,7 @@ jobs:
           go tool cover -func=coverage.out | tee coverage.txt
           pct=$(awk '/^total:/ {gsub("%","",$3); print $3}' coverage.txt)
           echo "Total coverage (excluding cmd): ${pct}%"
-          awk -v p="$pct" 'BEGIN { if (p+0 < 55) { print "Coverage below 55% soft floor: " p "%"; exit 1 } }'
+          awk -v p="$pct" 'BEGIN { if (p+0 < 60) { print "Coverage below 60% soft floor: " p "%"; exit 1 } }'
       - uses: actions/upload-artifact@v4
         with:
           name: coverage
