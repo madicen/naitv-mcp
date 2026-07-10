@@ -21,7 +21,7 @@ func newTestModel(t *testing.T) Model {
 func TestUpdate_FetchRegistry_SetsLoadingAndRequest(t *testing.T) {
 	m := newTestModel(t)
 
-	updated, req, cmd := m.Update(key("r"))
+	updated, req, cmd := m.Update(pressKey("r"))
 
 	if req == nil || !req.FetchRegistry {
 		t.Fatalf("expected FetchRegistry request, got %#v", req)
@@ -107,7 +107,7 @@ func TestUpdate_CustomInstallInputMode(t *testing.T) {
 	m.installed = []entry.Entry{{Kind: "plugin", Name: "p1"}}
 
 	// Open custom install input.
-	updated, req, _ := m.Update(key("i"))
+	updated, req, _ := m.Update(pressKey("i"))
 	if req != nil {
 		t.Fatalf("unexpected request %#v", req)
 	}
@@ -116,7 +116,7 @@ func TestUpdate_CustomInstallInputMode(t *testing.T) {
 	}
 
 	// Esc cancels input mode.
-	updated, req, _ = updated.Update(keyType(tea.KeyEsc))
+	updated, req, _ = updated.Update(pressKey("esc"))
 	if req != nil {
 		t.Fatalf("unexpected request %#v", req)
 	}
@@ -125,12 +125,12 @@ func TestUpdate_CustomInstallInputMode(t *testing.T) {
 	}
 
 	// Re-open and reject empty source.
-	updated, _, _ = updated.Update(key("i"))
-	updated, req, _ = updated.Update(key("enter"))
+	updated, _, _ = updated.Update(pressKey("i"))
+	updated, req, _ = updated.Update(pressKey("enter"))
 	if req != nil {
 		t.Fatalf("unexpected request %#v", req)
 	}
-	if updated.inputActive {
+	if !updated.inputActive {
 		t.Error("expected input to stay open on empty source")
 	}
 	if !strings.Contains(updated.status, "Enter a plugin") {
@@ -138,9 +138,10 @@ func TestUpdate_CustomInstallInputMode(t *testing.T) {
 	}
 
 	// Type a source and confirm install.
-	updated, _, _ = updated.Update(key("i"))
+	updated, _, _ = updated.Update(pressKey("i"))
 	updated.input.SetValue("./plugins/demo.json")
-	updated, req, cmd = updated.Update(key("enter"))
+	var cmd tea.Cmd
+	updated, req, cmd = updated.Update(pressKey("enter"))
 	if req == nil || !req.Install || req.Source != "./plugins/demo.json" {
 		t.Fatalf("expected install request for custom source, got %#v", req)
 	}
@@ -162,7 +163,7 @@ func TestUpdate_BrowseInstall(t *testing.T) {
 		{Name: "browse-plugin", URL: "https://example.com/browse.json"},
 	}
 
-	updated, req, cmd := m.Update(key("i"))
+	updated, req, cmd := m.Update(pressKey("i"))
 
 	if req == nil || !req.Install || req.Source != "browse-plugin" {
 		t.Fatalf("expected browse install request, got %#v", req)
@@ -181,7 +182,7 @@ func TestUpdate_BrowseInstallAlreadyInstalled(t *testing.T) {
 	m.available = []plugin.RegistryEntry{{Name: "existing-plugin"}}
 	m.installedNames = map[string]bool{"existing-plugin": true}
 
-	updated, req, _ := m.Update(key("i"))
+	updated, req, _ := m.Update(pressKey("i"))
 
 	if req != nil {
 		t.Fatalf("unexpected request %#v", req)
@@ -195,7 +196,7 @@ func TestUpdate_Uninstall(t *testing.T) {
 	m := newTestModel(t)
 	m.installed = []entry.Entry{{Kind: "plugin", Name: "remove-me"}}
 
-	updated, req, cmd := m.Update(key("u"))
+	updated, req, cmd := m.Update(pressKey("u"))
 
 	if req == nil || !req.Uninstall || req.Name != "remove-me" {
 		t.Fatalf("expected uninstall request, got %#v", req)
@@ -263,13 +264,15 @@ func TestUpdate_PluginUninstalled_Success(t *testing.T) {
 	}
 }
 
-func key(s string) tea.KeyPressMsg {
+func pressKey(s string) tea.KeyPressMsg {
+	switch s {
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEsc, Text: "esc"}
+	}
 	if len(s) == 1 {
 		return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
 	}
 	return tea.KeyPressMsg{Text: s}
-}
-
-func keyType(code rune) tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: code}
 }

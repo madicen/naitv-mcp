@@ -61,7 +61,7 @@ func (r *Renderer) RenderBody(entryID, body string) string {
 
 func renderMarkdown(body string, width int) (string, error) {
 	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithEnvironmentConfig(),
 		glamour.WithWordWrap(width),
 		glamour.WithStyles(styles.DarkStyleConfig),
 	)
