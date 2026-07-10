@@ -74,7 +74,7 @@ func (s *Store) ImportJSON(r io.Reader, mode ImportMode) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("store: import begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if mode == ImportReplace {
 		if _, err := tx.Exec(`DELETE FROM entries`); err != nil {

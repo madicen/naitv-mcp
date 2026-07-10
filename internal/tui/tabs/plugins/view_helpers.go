@@ -188,13 +188,13 @@ func (m *Model) renderBottom() string {
 	}
 
 	var hints []keymap.ActionZone
-	hints = append(hints, keymap.ActionZone{zones.PluginActInstall, m.keys.Install})
+	hints = append(hints, keymap.ActionZone{ZoneID: zones.PluginActInstall, Binding: m.keys.Install})
 	if m.mode == modeInstalled {
-		hints = append(hints, keymap.ActionZone{zones.PluginActUninstall, m.keys.Uninstall})
+		hints = append(hints, keymap.ActionZone{ZoneID: zones.PluginActUninstall, Binding: m.keys.Uninstall})
 	}
 	hints = append(hints,
-		keymap.ActionZone{zones.PluginActTab, m.keys.Tab},
-		keymap.ActionZone{zones.PluginActRefresh, m.keys.Refresh},
+		keymap.ActionZone{ZoneID: zones.PluginActTab, Binding: m.keys.Tab},
+		keymap.ActionZone{ZoneID: zones.PluginActRefresh, Binding: m.keys.Refresh},
 	)
 	hintLine := keymap.RenderActionBar(m.zoneManager, hints)
 

@@ -30,7 +30,7 @@ func TestJourney_MouseReviewApprove(t *testing.T) {
 	m := newTestModel(t, st)
 	m = updateModel(m, review.LoadProposalsCmd(st)())
 	m = clickZone(t, m, zones.TabReview)
-	m = clickZone(t, m, zones.ReviewApprove)
+	clickZone(t, m, zones.ReviewApprove)
 	for _, p := range must(st.ListPending()) {
 		if p.ID == prop.ID { t.Fatal("expected approved") }
 	}

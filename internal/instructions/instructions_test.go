@@ -64,6 +64,22 @@ func TestFilterInit(t *testing.T) {
 	}
 }
 
+func TestFilterInitByKinds(t *testing.T) {
+	entries := []entry.Entry{
+		{Kind: "rule", Name: "r1", Body: "a"},
+		{Kind: "note", Name: "n1", Body: "b"},
+		{Kind: "tool", Name: "t1", Body: "c"},
+	}
+	got := FilterInitByKinds(entries, []string{"rule", "tool"})
+	if len(got) != 2 {
+		t.Fatalf("got %d entries", len(got))
+	}
+	all := FilterInitByKinds(entries, nil)
+	if len(all) != 3 {
+		t.Fatalf("nil kinds should include all init kinds, got %d", len(all))
+	}
+}
+
 func TestRenderUnknownKindAppended(t *testing.T) {
 	entries := []entry.Entry{
 		{Kind: "custom", Name: "thing", Body: "some body"},

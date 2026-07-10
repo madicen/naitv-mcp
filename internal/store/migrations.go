@@ -31,11 +31,11 @@ func runMigrations(db *sql.DB) error {
 			return fmt.Errorf("migration %d begin: %w", i+1, err)
 		}
 		if err := m.fn(tx); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("migration %d (%s): %w", i+1, m.name, err)
 		}
 		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
-			tx.Rollback()
+			_ = tx.Rollback()
 			return fmt.Errorf("migration %d set user_version: %w", i+1, err)
 		}
 		if err := tx.Commit(); err != nil {

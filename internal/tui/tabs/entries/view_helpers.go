@@ -180,13 +180,13 @@ func deliveryGlyph(e entry.Entry) string {
 // renderActionBar renders the action buttons at the bottom.
 func renderActionBar(m *Model) string {
 	return keymap.RenderActionBar(m.zoneManager, []keymap.ActionZone{
-		{zones.EntriesNew, m.keys.New},
-		{zones.EntriesEdit, m.keys.Edit},
-		{zones.EntriesDelete, m.keys.Delete},
-		{zones.EntriesDelivery, m.keys.Delivery},
-		{zones.EntriesCopy, m.keys.Copy},
-		{zones.EntriesSearch, m.keys.Search},
-		{zones.EntriesReview, m.keys.Review},
+		{ZoneID: zones.EntriesNew, Binding: m.keys.New},
+		{ZoneID: zones.EntriesEdit, Binding: m.keys.Edit},
+		{ZoneID: zones.EntriesDelete, Binding: m.keys.Delete},
+		{ZoneID: zones.EntriesDelivery, Binding: m.keys.Delivery},
+		{ZoneID: zones.EntriesCopy, Binding: m.keys.Copy},
+		{ZoneID: zones.EntriesSearch, Binding: m.keys.Search},
+		{ZoneID: zones.EntriesReview, Binding: m.keys.Review},
 	})
 }
 

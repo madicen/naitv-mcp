@@ -33,7 +33,7 @@ func TestToggleDeliveryCmd(t *testing.T) {
 }
 func TestSearchCmd(t *testing.T) {
 	st,_ := store.Open(t.TempDir()+"/t.db"); defer st.Close()
-	st.Create(entry.Entry{Kind:"repo",Name:"find-me",Body:"needle"})
+	if _, err := st.Create(entry.Entry{Kind:"repo",Name:"find-me",Body:"needle"}); err != nil { t.Fatal(err) }
 	msg := SearchCmd(st,"needle")().(SearchResultsMsg)
 	if len(msg.Entries)!=1 || msg.Entries[0].Name!="find-me" { t.Fatal() }
 }

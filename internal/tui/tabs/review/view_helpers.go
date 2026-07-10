@@ -84,10 +84,10 @@ func renderProposalDetail(m *Model, width, height int) string {
 // renderReviewActionBar renders the action buttons at the bottom.
 func renderReviewActionBar(m *Model) string {
 	return keymap.RenderActionBar(m.zoneManager, []keymap.ActionZone{
-		{zones.ReviewApprove, m.keys.Approve},
-		{zones.ReviewReject, m.keys.Reject},
-		{zones.ReviewEdit, m.keys.Edit},
-		{zones.ReviewApproveAll, m.keys.ApproveAll},
-		{"", m.keys.Back},
+		{ZoneID: zones.ReviewApprove, Binding: m.keys.Approve},
+		{ZoneID: zones.ReviewReject, Binding: m.keys.Reject},
+		{ZoneID: zones.ReviewEdit, Binding: m.keys.Edit},
+		{ZoneID: zones.ReviewApproveAll, Binding: m.keys.ApproveAll},
+		{ZoneID: "", Binding: m.keys.Back},
 	})
 }

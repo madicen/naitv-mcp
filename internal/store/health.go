@@ -37,9 +37,9 @@ func (s *Store) RebuildFTS() error {
 func (s *Store) OrphanProposals() ([]entry.Entry, error) {
 	rows, err := s.db.Query(`
 		SELECT ` + selectColsNoPrefix + `
-		FROM entries p
-		WHERE p.status = 'pending' AND p.target_id != ''
-		  AND NOT EXISTS (SELECT 1 FROM entries t WHERE t.id = p.target_id)
+		FROM entries e
+		WHERE e.status = 'pending' AND e.target_id != ''
+		  AND NOT EXISTS (SELECT 1 FROM entries t WHERE t.id = e.target_id)
 	`)
 	if err != nil {
 		return nil, err

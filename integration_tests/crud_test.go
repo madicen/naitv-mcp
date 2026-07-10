@@ -55,7 +55,7 @@ func TestJourney_FormSaveTyping(t *testing.T) {
 	m = typeString(m, "tool")
 	m = pressTab(m)
 	m = typeString(m, "typed-entry")
-	m = runPendingCmds(m, key("ctrl+s"), 15)
+	runPendingCmds(m, key("ctrl+s"), 15)
 	active, err := st.List("", nil)
 	if err != nil { t.Fatalf("list: %v", err) }
 	for _, e := range active {
@@ -141,7 +141,7 @@ func TestJourney_FormFieldAddRemove(t *testing.T) {
 	m = typeString(m, "env")
 	m = pressTab(m)
 	m = typeString(m, "prod")
-	m = runPendingCmds(m, key("ctrl+s"), 15)
+	runPendingCmds(m, key("ctrl+s"), 15)
 	active, err := st.List("", nil)
 	if err != nil { t.Fatalf("list: %v", err) }
 	for i := range active {

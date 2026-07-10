@@ -706,7 +706,7 @@ func (s *Store) ApproveAll() ([]entry.Entry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: approve all begin: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	var results []entry.Entry
 	for _, p := range pending {
