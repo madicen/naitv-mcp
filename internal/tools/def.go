@@ -72,6 +72,9 @@ type Def struct {
 	// Disabled prevents execution while keeping the tool registered.
 	// Set the "disabled" field to "true" in the entry to use this.
 	Disabled bool
+	// EnvAllowlist lists environment variable names passed to the subprocess.
+	// When empty, defaults to PATH and HOME only.
+	EnvAllowlist []string
 }
 
 // IsExecutable reports whether the entry should be treated as an executable
@@ -123,6 +126,14 @@ func ParseDef(e entry.Entry) (Def, error) {
 
 	if v := strings.TrimSpace(e.Fields["disabled"]); v == "true" || v == "1" || v == "yes" {
 		d.Disabled = true
+	}
+
+	if ea := strings.TrimSpace(e.Fields["env_allowlist"]); ea != "" {
+		for _, part := range strings.Split(ea, ",") {
+			if key := strings.TrimSpace(part); key != "" {
+				d.EnvAllowlist = append(d.EnvAllowlist, key)
+			}
+		}
 	}
 
 	return d, nil

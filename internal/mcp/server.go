@@ -387,6 +387,17 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		}
 		return textResult(setup.ContinueConfig(toolNames, binaryPath))
 	})
+
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "export_entries",
+		Description: "Export all entries as JSON (schema_version, exported_at, entries). Use for backup or sync between machines.",
+	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, _ struct{}) (*sdkmcp.CallToolResult, any, error) {
+		var buf strings.Builder
+		if err := st.ExportJSON(&buf); err != nil {
+			return toolError("export_entries error: %v", err)
+		}
+		return textResult(buf.String())
+	})
 }
 
 func registerDynamicTools(s *sdkmcp.Server, st *store.Store) error {

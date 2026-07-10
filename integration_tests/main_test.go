@@ -75,3 +75,7 @@ func key(s string) tea.KeyPressMsg {
 	}
 	return tea.KeyPressMsg{Text: s}
 }
+
+func keyType(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
+}

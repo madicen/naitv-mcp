@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -44,7 +45,7 @@ func newRootCmd() *cobra.Command {
 	root.Flags().BoolVar(&demo, "demo", false, "Run with seeded demo data (for VHS recordings)")
 	root.PersistentFlags().String("db", store.DefaultDBPath(), "Path to SQLite database")
 
-	root.AddCommand(newServeCmd(), newInitCmd(), newSeedDemoCmd())
+	root.AddCommand(newServeCmd(), newInitCmd(), newExportCmd(), newImportCmd(), newSeedDemoCmd())
 	return root
 }
 
@@ -81,6 +82,83 @@ func newInitCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&out, "out", "AGENTS.md", "Output file path. Use '-' to write to stdout.")
+	return cmd
+}
+
+func newExportCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Export all entries to JSON",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dbPath, err := cmd.Flags().GetString("db")
+			if err != nil {
+				return err
+			}
+			st, err := store.Open(dbPath)
+			if err != nil {
+				return fmt.Errorf("open store: %w", err)
+			}
+			defer st.Close()
+
+			var w io.Writer = os.Stdout
+			if out != "" && out != "-" {
+				f, err := os.Create(out)
+				if err != nil {
+					return fmt.Errorf("create %s: %w", out, err)
+				}
+				defer f.Close()
+				w = f
+			}
+			if err := st.ExportJSON(w); err != nil {
+				return err
+			}
+			if out != "" && out != "-" {
+				fmt.Fprintf(os.Stderr, "Exported entries to %s\n", out)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "", "Output file (default: stdout)")
+	return cmd
+}
+
+func newImportCmd() *cobra.Command {
+	var replace bool
+	cmd := &cobra.Command{
+		Use:   "import [file.json]",
+		Short: "Import entries from a JSON export",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dbPath, err := cmd.Flags().GetString("db")
+			if err != nil {
+				return err
+			}
+			st, err := store.Open(dbPath)
+			if err != nil {
+				return fmt.Errorf("open store: %w", err)
+			}
+			defer st.Close()
+
+			f, err := os.Open(args[0])
+			if err != nil {
+				return fmt.Errorf("open %s: %w", args[0], err)
+			}
+			defer f.Close()
+
+			mode := store.ImportMerge
+			if replace {
+				mode = store.ImportReplace
+			}
+			n, err := st.ImportJSON(f, mode)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(os.Stderr, "Imported %d entries (%s mode)\n", n, mode)
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&replace, "replace", false, "Replace all entries instead of merging")
 	return cmd
 }
 

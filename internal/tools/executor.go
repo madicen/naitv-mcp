@@ -37,7 +37,7 @@ func Run(ctx context.Context, def Def, args map[string]string) Result {
 	defer cancel()
 
 	c := exec.CommandContext(tctx, "sh", "-c", cmdStr) //nolint:gosec // exec is user-approved
-	c.Env = os.Environ()
+	c.Env = filterEnv(def.EnvAllowlist)
 
 	// Interpolate working_dir from runtime args (e.g. {project_root}) then
 	// expand ~. If placeholders remain unresolved (agent didn't pass the param),
@@ -131,4 +131,30 @@ func expandHome(path string) string {
 		return path
 	}
 	return filepath.Join(home, path[1:])
+}
+
+var defaultEnvAllowlist = []string{"PATH", "HOME"}
+
+func filterEnv(allowlist []string) []string {
+	if len(allowlist) == 0 {
+		allowlist = defaultEnvAllowlist
+	}
+	allowed := make(map[string]bool, len(allowlist))
+	for _, k := range allowlist {
+		allowed[k] = true
+	}
+	var out []string
+	for _, e := range os.Environ() {
+		key, _, _ := strings.Cut(e, "=")
+		if allowed[key] {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// ShellCommandLine returns the exact sh -c invocation for a tool definition.
+func ShellCommandLine(def Def, args map[string]string) string {
+	cmdStr := interpolate(def.Exec, args)
+	return fmt.Sprintf("sh -c %q", cmdStr)
 }

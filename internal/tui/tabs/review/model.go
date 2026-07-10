@@ -231,7 +231,11 @@ func (m *Model) formatProposalDetail(p entry.Entry) string {
 		sb.WriteString("⚠  EXECUTABLE TOOL PROPOSAL\n")
 		sb.WriteString("   Approving this will register a shell command that runs\n")
 		sb.WriteString("   on the server when the model calls the tool. Review the\n")
-		sb.WriteString("   exec field carefully before approving.\n\n")
+		sb.WriteString("   exec field carefully before approving.\n")
+		if def, err := tools.ParseDef(p); err == nil {
+			fmt.Fprintf(&sb, "\nCommand: %s\n", tools.ShellCommandLine(def, nil))
+		}
+		sb.WriteString("\n")
 	}
 
 	badge := "NEW"
