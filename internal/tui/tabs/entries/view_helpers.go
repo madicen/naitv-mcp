@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
@@ -178,17 +179,15 @@ func deliveryGlyph(e entry.Entry) string {
 
 // renderActionBar renders the action buttons at the bottom.
 func renderActionBar(m *Model) string {
-	newBtn := m.zoneManager.Mark(zones.EntriesNew, theme.ActionBtn.Render("[ n New ]"))
-	editBtn := m.zoneManager.Mark(zones.EntriesEdit, theme.ActionBtn.Render("[ e Edit ]"))
-	deleteBtn := m.zoneManager.Mark(zones.EntriesDelete, theme.ActionBtn.Render("[ d Delete ]"))
-	deliveryBtn := m.zoneManager.Mark(zones.EntriesDelivery, theme.ActionBtn.Render("[ i Init/Ask ]"))
-	copyBtn := m.zoneManager.Mark(zones.EntriesCopy, theme.ActionBtn.Render("[ c Copy ]"))
-	searchBtn := m.zoneManager.Mark(zones.EntriesSearch, theme.ActionBtn.Render("[ / Search ]"))
-	reviewBtn := m.zoneManager.Mark(zones.EntriesReview, theme.ActionBtn.Render("[ R Review ]"))
-
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		newBtn, editBtn, deleteBtn, deliveryBtn, copyBtn, searchBtn, reviewBtn,
-	)
+	return keymap.RenderActionBar(m.zoneManager, []keymap.ActionZone{
+		{zones.EntriesNew, m.keys.New},
+		{zones.EntriesEdit, m.keys.Edit},
+		{zones.EntriesDelete, m.keys.Delete},
+		{zones.EntriesDelivery, m.keys.Delivery},
+		{zones.EntriesCopy, m.keys.Copy},
+		{zones.EntriesSearch, m.keys.Search},
+		{zones.EntriesReview, m.keys.Review},
+	})
 }
 
 // renderConfirmDelete renders the delete confirmation prompt.

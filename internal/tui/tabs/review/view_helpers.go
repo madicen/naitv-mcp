@@ -5,6 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
@@ -82,13 +83,11 @@ func renderProposalDetail(m *Model, width, height int) string {
 
 // renderReviewActionBar renders the action buttons at the bottom.
 func renderReviewActionBar(m *Model) string {
-	approveBtn := m.zoneManager.Mark(zones.ReviewApprove, theme.ActionBtn.Render("[ a Approve ]"))
-	rejectBtn := m.zoneManager.Mark(zones.ReviewReject, theme.ActionBtn.Render("[ r Reject ]"))
-	editBtn := m.zoneManager.Mark(zones.ReviewEdit, theme.ActionBtn.Render("[ e Edit ]"))
-	approveAllBtn := m.zoneManager.Mark(zones.ReviewApproveAll, theme.ActionBtn.Render("[ A Approve All ]"))
-	escBtn := theme.ActionBtn.Render("[ esc Entries ]")
-
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		approveBtn, rejectBtn, editBtn, approveAllBtn, escBtn,
-	)
+	return keymap.RenderActionBar(m.zoneManager, []keymap.ActionZone{
+		{zones.ReviewApprove, m.keys.Approve},
+		{zones.ReviewReject, m.keys.Reject},
+		{zones.ReviewEdit, m.keys.Edit},
+		{zones.ReviewApproveAll, m.keys.ApproveAll},
+		{"", m.keys.Back},
+	})
 }

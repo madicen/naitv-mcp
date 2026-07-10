@@ -4,11 +4,13 @@ import (
 	"sort"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -66,6 +68,7 @@ type Model struct {
 
 	// kindDD is the kind-filter dropdown (replaces the old pill row).
 	kindDD *dropdownv2.Dropdown
+	keys   keymap.Entries
 	// contentTop is the absolute terminal row where the entries content begins
 	// (the tab-bar height). Mouse events are translated by this offset before
 	// reaching an open dropdown's geometric hit-test, since the dropdown panel
@@ -84,6 +87,7 @@ func NewModel(zm *zone.Manager) Model {
 		searchInput: si,
 		detail:      listpane.NewDetail(),
 		collapsed:   make(map[string]bool),
+		keys:        keymap.DefaultEntries,
 	}
 }
 
@@ -172,11 +176,11 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		if m.showConfirmDelete {
-			switch msg.String() {
-			case "y", "enter":
+			switch {
+			case key.Matches(msg, m.keys.ConfirmYes):
 				req = &Request{ConfirmDelete: true}
 				return m, req, nil
-			case "n", "esc":
+			case key.Matches(msg, m.keys.ConfirmNo):
 				m.showConfirmDelete = false
 				m.deleteTargetID = ""
 			}
@@ -184,13 +188,13 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		}
 
 		if m.searchMode {
-			switch msg.String() {
-			case "esc":
+			switch {
+			case key.Matches(msg, m.keys.SearchEsc):
 				m.searchMode = false
 				m.searchInput.Blur()
 				m.searchInput.SetValue("")
 				m.searchQuery = ""
-			case "enter":
+			case msg.String() == "enter":
 				m.searchMode = false
 				m.searchInput.Blur()
 			default:
@@ -199,16 +203,16 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			return m, nil, cmd
 		}
 
-		switch msg.String() {
-		case "j", "down":
+		switch {
+		case key.Matches(msg, m.keys.Down):
 			if m.sel.MoveDown(len(m.flatItems)) {
 				m.updateViewport()
 			}
-		case "k", "up":
+		case key.Matches(msg, m.keys.Up):
 			if m.sel.MoveUp() {
 				m.updateViewport()
 			}
-		case " ":
+		case key.Matches(msg, m.keys.Space):
 			// Space on a group header toggles its collapse state.
 			if m.sel.Index < len(m.flatItems) {
 				item := m.flatItems[m.sel.Index]
@@ -218,32 +222,32 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 					m.updateViewport()
 				}
 			}
-		case "n":
+		case key.Matches(msg, m.keys.New):
 			req = &Request{OpenNewForm: true}
-		case "e":
+		case key.Matches(msg, m.keys.Edit):
 			if m.SelectedEntry() != nil {
 				req = &Request{OpenEditForm: true}
 			}
-		case "d":
+		case key.Matches(msg, m.keys.Delete):
 			sel := m.SelectedEntry()
 			if sel != nil {
 				m.showConfirmDelete = true
 				m.deleteTargetID = sel.ID
 			}
-		case "i":
+		case key.Matches(msg, m.keys.Delivery):
 			if m.SelectedEntry() != nil {
 				req = &Request{ToggleDelivery: true}
 			}
-		case "c":
+		case key.Matches(msg, m.keys.Copy):
 			if m.SelectedEntry() != nil {
 				req = &Request{CopyBody: true}
 			}
-		case "/":
+		case key.Matches(msg, m.keys.Search):
 			m.searchMode = true
 			m.searchInput.Focus()
-		case "R":
+		case key.Matches(msg, m.keys.Review):
 			req = &Request{SwitchToReview: true}
-		case "tab":
+		case key.Matches(msg, m.keys.Tab):
 			// Open the kind-filter dropdown. The dropdown opens on Enter when
 			// focused, so synthesize one (it is kept focused; see
 			// newKindDropdown). Return directly so the open command is not
