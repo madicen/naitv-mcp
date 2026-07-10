@@ -5,11 +5,11 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
+	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -55,9 +55,11 @@ type Model struct {
 
 	// UI state
 	mode          viewMode
-	cursor        int
 	width, height int
-	viewport      viewport.Model
+
+	pane   listpane.Layout
+	detail listpane.Detail
+	sel    listpane.Selection
 
 	// Text input for "install from custom source"
 	inputActive bool
@@ -79,6 +81,7 @@ func NewModel(zm *zone.Manager) Model {
 		zoneManager:    zm,
 		installedNames: make(map[string]bool),
 		input:          inp,
+		detail:         listpane.NewDetail(),
 	}
 }
 
@@ -119,7 +122,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		} else {
 			m.available = msg.Registry.Plugins
 			m.mode = modeBrowse
-			m.cursor = 0
+			m.sel.Index = 0
 			m.status = fmt.Sprintf("Registry loaded — %d plugin(s) available", len(m.available))
 		}
 		m.updateViewport()
@@ -181,13 +184,11 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 
 		switch msg.String() {
 		case "j", "down":
-			if m.cursor < m.listLen()-1 {
-				m.cursor++
+			if m.sel.MoveDown(m.listLen()) {
 				m.updateViewport()
 			}
 		case "k", "up":
-			if m.cursor > 0 {
-				m.cursor--
+			if m.sel.MoveUp() {
 				m.updateViewport()
 			}
 		case "tab":
@@ -199,12 +200,12 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 					req = &Request{FetchRegistry: true}
 				} else {
 					m.mode = modeBrowse
-					m.cursor = 0
+					m.sel.Index = 0
 					m.updateViewport()
 				}
 			} else {
 				m.mode = modeInstalled
-				m.cursor = 0
+				m.sel.Index = 0
 				m.updateViewport()
 			}
 		case "r":
@@ -263,10 +264,8 @@ func (m Model) View() string {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	_, detailW := layout.SplitWidths(w)
-	contentH := layout.ContentHeight(h, layout.PluginsFooterRows+2)
-	vpW, vpH := layout.ViewportSize(detailW, contentH)
-	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
+	m.pane = listpane.Compute(w, h, layout.PluginsFooterRows+2, 0)
+	m.detail.Resize(m.pane)
 	m.updateViewport()
 }
 
@@ -280,42 +279,35 @@ func (m *Model) listLen() int {
 }
 
 func (m *Model) clampCursor() {
-	if l := m.listLen(); l == 0 {
-		m.cursor = 0
-	} else if m.cursor >= l {
-		m.cursor = l - 1
-	}
+	m.sel.Clamp(m.listLen())
 }
 
 func (m *Model) selectedInstalled() *entry.Entry {
-	if len(m.installed) == 0 || m.cursor >= len(m.installed) {
+	if len(m.installed) == 0 || m.sel.Index >= len(m.installed) {
 		return nil
 	}
-	e := m.installed[m.cursor]
+	e := m.installed[m.sel.Index]
 	return &e
 }
 
 func (m *Model) selectedAvailable() *plugin.RegistryEntry {
-	if len(m.available) == 0 || m.cursor >= len(m.available) {
+	if len(m.available) == 0 || m.sel.Index >= len(m.available) {
 		return nil
 	}
-	e := m.available[m.cursor]
+	e := m.available[m.sel.Index]
 	return &e
 }
 
 func (m *Model) updateViewport() {
-	m.viewport.SetContent(m.detailContent())
+	m.detail.SetContent(m.detailContent())
 }
 
-func (m *Model) listW() int {
-	w, _ := layout.SplitWidths(m.width)
-	return w
-}
-func (m *Model) detailW() int {
-	_, w := layout.SplitWidths(m.width)
-	return w
-}
+func (m *Model) listW() int   { return m.pane.ListW }
+func (m *Model) detailW() int { return m.pane.DetailW }
 func (m *Model) contentH() int {
+	if m.height != 0 {
+		return m.pane.ContentH
+	}
 	return layout.ContentHeight(m.height, layout.PluginsFooterRows+2)
 }
 

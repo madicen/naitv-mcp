@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
@@ -63,11 +64,8 @@ func renderKindFilter(m *Model) string {
 
 // renderSplit renders the left+right split pane.
 func renderSplit(m *Model) string {
-	listW, detailW := layout.SplitWidths(m.width)
-	contentH := layout.ContentHeight(m.height, layout.EntriesFooterRows+2)
-
-	leftPane := renderList(m, listW, contentH)
-	rightPane := renderDetail(m, detailW, contentH)
+	leftPane := renderList(m, m.pane.ListW, m.pane.ContentH)
+	rightPane := renderDetail(m, m.pane.DetailW, m.pane.ContentH)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, " ", rightPane)
 }
@@ -75,14 +73,14 @@ func renderSplit(m *Model) string {
 // renderList renders the flat entry list (with optional group headers) in the
 // left pane.
 func renderList(m *Model, width, height int) string {
-	innerW, innerH := layout.ViewportSize(width, height)
+	innerW, _ := layout.ViewportSize(width, height)
 
 	// Groups are active when the first flat item is a header.
 	hasGroups := len(m.flatItems) > 0 && m.flatItems[0].kind == itemKindHeader
 
 	var rows []string
 	for i, item := range m.flatItems {
-		selected := i == m.selectedIdx
+		selected := i == m.sel.Index
 		var rendered string
 		if item.kind == itemKindHeader {
 			rendered = renderGroupHeader(m, item, selected, innerW)
@@ -96,16 +94,7 @@ func renderList(m *Model, width, height int) string {
 		rows = append(rows, theme.DimStyle.Render("  No entries"))
 	}
 
-	// Pad to height.
-	for len(rows) < innerH {
-		rows = append(rows, "")
-	}
-	if len(rows) > innerH {
-		rows = rows[:innerH]
-	}
-
-	content := strings.Join(rows, "\n")
-	return theme.Pane.Width(innerW).Height(innerH).Render(content)
+	return listpane.RenderList(width, height, rows)
 }
 
 // renderGroupHeader renders one collapsible group header row.
@@ -168,9 +157,7 @@ func renderEntryRow(e entry.Entry, selected bool, width int, indented bool) stri
 
 // renderDetail renders the selected entry detail in the right pane.
 func renderDetail(m *Model, width, height int) string {
-	innerW, innerH := layout.ViewportSize(width, height)
-	content := m.viewport.View()
-	return theme.Pane.Width(innerW).Height(innerH).Render(content)
+	return m.detail.RenderPane(width, height)
 }
 
 // deliveryGlyph renders a styled glyph indicating an entry's delivery mode

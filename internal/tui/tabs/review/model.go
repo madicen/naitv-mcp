@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/internal/tools"
@@ -24,19 +24,20 @@ type Request struct {
 
 // Model holds the state for the review tab.
 type Model struct {
-	zoneManager   *zone.Manager
-	proposals     []entry.Entry
-	selectedIdx   int
+	zoneManager *zone.Manager
+	proposals   []entry.Entry
 	width, height int
-	viewport      viewport.Model
+
+	pane   listpane.Layout
+	detail listpane.Detail
+	sel    listpane.Selection
 }
 
 // NewModel creates a new review Model.
 func NewModel(zm *zone.Manager) Model {
-	vp := viewport.New(viewport.WithWidth(0), viewport.WithHeight(0))
 	return Model{
 		zoneManager: zm,
-		viewport:    vp,
+		detail:      listpane.NewDetail(),
 	}
 }
 
@@ -53,9 +54,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	switch msg := msg.(type) {
 	case ProposalsLoadedMsg:
 		m.proposals = msg.Proposals
-		if m.selectedIdx >= len(m.proposals) {
-			m.selectedIdx = intMax(0, len(m.proposals)-1)
-		}
+		m.sel.Clamp(len(m.proposals))
 		m.updateViewport()
 		return m, nil, nil
 
@@ -67,9 +66,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		}
 		m.proposals = newProps
-		if m.selectedIdx >= len(m.proposals) {
-			m.selectedIdx = intMax(0, len(m.proposals)-1)
-		}
+		m.sel.Clamp(len(m.proposals))
 		m.updateViewport()
 		return m, nil, nil
 
@@ -81,15 +78,13 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		}
 		m.proposals = newProps
-		if m.selectedIdx >= len(m.proposals) {
-			m.selectedIdx = intMax(0, len(m.proposals)-1)
-		}
+		m.sel.Clamp(len(m.proposals))
 		m.updateViewport()
 		return m, nil, nil
 
 	case AllApprovedMsg:
 		m.proposals = nil
-		m.selectedIdx = 0
+		m.sel.Index = 0
 		m.updateViewport()
 		return m, nil, nil
 
@@ -100,13 +95,11 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	case tea.KeyPressMsg:
 		switch msg.String() {
 		case "j", "down":
-			if m.selectedIdx < len(m.proposals)-1 {
-				m.selectedIdx++
+			if m.sel.MoveDown(len(m.proposals)) {
 				m.updateViewport()
 			}
 		case "k", "up":
-			if m.selectedIdx > 0 {
-				m.selectedIdx--
+			if m.sel.MoveUp() {
 				m.updateViewport()
 			}
 		case "a":
@@ -161,7 +154,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		} else {
 			for i := range m.proposals {
 				if m.zoneManager.Get(zones.ReviewRow(i)).InBounds(msg) {
-					m.selectedIdx = i
+					m.sel.Index = i
 					m.updateViewport()
 					break
 				}
@@ -170,11 +163,11 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		return m, req, cmd
 
 	case tea.MouseWheelMsg:
-		m.viewport, cmd = m.viewport.Update(msg)
+		m.detail, cmd = m.detail.Update(msg)
 		return m, req, cmd
 	}
 
-	m.viewport, cmd = m.viewport.Update(msg)
+	m.detail, cmd = m.detail.Update(msg)
 	return m, req, cmd
 }
 
@@ -182,21 +175,17 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	_, detailW := layout.SplitWidths(w)
-	contentH := layout.ContentHeight(h, layout.ReviewFooterRows+2)
-	vpW, vpH := layout.ViewportSize(detailW, contentH)
-	// The detail viewport shares the pane with the inline action-button line.
-	vpH = layout.ContentHeight(vpH, 1)
-	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
+	m.pane = listpane.Compute(w, h, layout.ReviewFooterRows+2, 1)
+	m.detail.Resize(m.pane)
 	m.updateViewport()
 }
 
 // SelectedProposal returns the currently selected proposal or nil.
 func (m *Model) SelectedProposal() *entry.Entry {
-	if len(m.proposals) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.proposals) {
+	if len(m.proposals) == 0 || m.sel.Index < 0 || m.sel.Index >= len(m.proposals) {
 		return nil
 	}
-	p := m.proposals[m.selectedIdx]
+	p := m.proposals[m.sel.Index]
 	return &p
 }
 
@@ -213,10 +202,10 @@ func (m *Model) SelectedID() string {
 func (m *Model) updateViewport() {
 	p := m.SelectedProposal()
 	if p == nil {
-		m.viewport.SetContent("No proposals.")
+		m.detail.SetContent("No proposals.")
 		return
 	}
-	m.viewport.SetContent(formatProposalDetail(*p))
+	m.detail.SetContent(formatProposalDetail(*p))
 }
 
 // formatProposalDetail formats a proposal for the detail pane.
@@ -283,11 +272,4 @@ func formatProposalDetail(p entry.Entry) string {
 	sb.WriteString("[ ✓ Approve (a) ]  [ ✗ Reject (r) ]  [ ✎ Edit (e) ]\n")
 
 	return sb.String()
-}
-
-func intMax(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

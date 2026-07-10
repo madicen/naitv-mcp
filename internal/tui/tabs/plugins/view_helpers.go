@@ -37,7 +37,7 @@ func (m *Model) renderList() string {
 			rows = append(rows, theme.DimStyle.Render(" Press i to install one."))
 		} else {
 			for i, e := range m.installed {
-				rows = append(rows, renderInstalledRow(e, i == m.cursor, w))
+				rows = append(rows, renderInstalledRow(e, i == m.sel.Index, w))
 			}
 		}
 	case modeBrowse:
@@ -47,7 +47,7 @@ func (m *Model) renderList() string {
 			rows = append(rows, theme.DimStyle.Render(" Press r to fetch registry."))
 		} else {
 			for i, re := range m.available {
-				rows = append(rows, renderAvailableRow(re, i == m.cursor, w, m.installedNames[re.Name]))
+				rows = append(rows, renderAvailableRow(re, i == m.sel.Index, w, m.installedNames[re.Name]))
 			}
 		}
 	}
@@ -86,10 +86,7 @@ func renderAvailableRow(re plugin.RegistryEntry, selected bool, w int, installed
 
 // renderDetail renders the right-pane detail box.
 func (m *Model) renderDetail() string {
-	w := m.detailW()
-	h := m.contentH()
-	inner := theme.PluginDetail.Width(w - 2).Height(h - 2).Render(m.viewport.View())
-	return inner
+	return m.detail.RenderBorderless(m.detailW(), m.contentH())
 }
 
 // detailContent generates the text displayed in the detail viewport.

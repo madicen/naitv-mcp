@@ -5,10 +5,10 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -49,14 +49,16 @@ type Model struct {
 	entries           []entry.Entry
 	kinds             []string
 	selectedKind      string
-	selectedIdx       int
 	width, height     int
 	searchMode        bool
 	searchInput       textinput.Model
 	searchQuery       string
-	viewport          viewport.Model
 	showConfirmDelete bool
 	deleteTargetID    string
+
+	pane   listpane.Layout
+	detail listpane.Detail
+	sel    listpane.Selection
 
 	// Group-collapse state.
 	collapsed map[string]bool // group name → collapsed
@@ -77,12 +79,10 @@ func NewModel(zm *zone.Manager) Model {
 	si.Placeholder = "Search..."
 	si.CharLimit = 200
 
-	vp := viewport.New(viewport.WithWidth(0), viewport.WithHeight(0))
-
 	return Model{
 		zoneManager: zm,
 		searchInput: si,
-		viewport:    vp,
+		detail:      listpane.NewDetail(),
 		collapsed:   make(map[string]bool),
 	}
 }
@@ -161,7 +161,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	case SearchResultsMsg:
 		m.entries = msg.Entries
 		m.searchQuery = msg.Query
-		m.selectedIdx = 0
+		m.sel.Index = 0
 		m.buildFlatItems()
 		m.updateViewport()
 		return m, nil, nil
@@ -201,19 +201,17 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 
 		switch msg.String() {
 		case "j", "down":
-			if m.selectedIdx < len(m.flatItems)-1 {
-				m.selectedIdx++
+			if m.sel.MoveDown(len(m.flatItems)) {
 				m.updateViewport()
 			}
 		case "k", "up":
-			if m.selectedIdx > 0 {
-				m.selectedIdx--
+			if m.sel.MoveUp() {
 				m.updateViewport()
 			}
 		case " ":
 			// Space on a group header toggles its collapse state.
-			if m.selectedIdx < len(m.flatItems) {
-				item := m.flatItems[m.selectedIdx]
+			if m.sel.Index < len(m.flatItems) {
+				item := m.flatItems[m.sel.Index]
 				if item.kind == itemKindHeader {
 					m.collapsed[item.groupName] = !m.collapsed[item.groupName]
 					m.buildFlatItems()
@@ -298,7 +296,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 						m.collapsed[item.groupName] = !m.collapsed[item.groupName]
 						m.buildFlatItems()
 					} else {
-						m.selectedIdx = i
+						m.sel.Index = i
 					}
 					m.updateViewport()
 					break
@@ -308,11 +306,11 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		return m, req, cmd
 
 	case tea.MouseWheelMsg:
-		m.viewport, cmd = m.viewport.Update(msg)
+		m.detail, cmd = m.detail.Update(msg)
 		return m, nil, cmd
 	}
 
-	m.viewport, cmd = m.viewport.Update(msg)
+	m.detail, cmd = m.detail.Update(msg)
 	return m, req, cmd
 }
 
@@ -320,20 +318,18 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	_, detailW := layout.SplitWidths(w)
-	contentH := layout.ContentHeight(h, layout.EntriesFooterRows+2)
-	vpW, vpH := layout.ViewportSize(detailW, contentH)
-	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
+	m.pane = listpane.Compute(w, h, layout.EntriesFooterRows+2, 0)
+	m.detail.Resize(m.pane)
 	m.updateViewport()
 }
 
 // SelectedEntry returns the currently selected entry, or nil if the cursor is
 // on a group header or the list is empty.
 func (m *Model) SelectedEntry() *entry.Entry {
-	if len(m.flatItems) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.flatItems) {
+	if len(m.flatItems) == 0 || m.sel.Index < 0 || m.sel.Index >= len(m.flatItems) {
 		return nil
 	}
-	item := m.flatItems[m.selectedIdx]
+	item := m.flatItems[m.sel.Index]
 	if item.kind != itemKindEntry {
 		return nil
 	}
@@ -344,7 +340,7 @@ func (m *Model) SelectedEntry() *entry.Entry {
 // SetSelectedKind sets the active kind filter.
 func (m *Model) SetSelectedKind(kind string) {
 	m.selectedKind = kind
-	m.selectedIdx = 0
+	m.sel.Index = 0
 }
 
 // SelectedKind returns the currently active kind filter.
@@ -458,9 +454,9 @@ func (m *Model) buildFlatItems() {
 
 	// Clamp the cursor.
 	if l := len(m.flatItems); l == 0 {
-		m.selectedIdx = 0
-	} else if m.selectedIdx >= l {
-		m.selectedIdx = l - 1
+		m.sel.Index = 0
+	} else {
+		m.sel.Clamp(l)
 	}
 }
 
@@ -470,10 +466,10 @@ func (m *Model) buildFlatItems() {
 func (m *Model) updateViewport() {
 	sel := m.SelectedEntry()
 	if sel == nil {
-		m.viewport.SetContent("No entries.")
+		m.detail.SetContent("No entries.")
 		return
 	}
-	m.viewport.SetContent(formatEntryDetail(*sel))
+	m.detail.SetContent(formatEntryDetail(*sel))
 }
 
 // formatEntryDetail formats an entry for the detail pane.
