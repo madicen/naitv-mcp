@@ -62,12 +62,16 @@ func runCmds(m *tui.Model, cmd tea.Cmd) {
 }
 
 func key(s string) tea.KeyPressMsg {
+	switch s {
+	case "ctrl+s":
+		return tea.KeyPressMsg{Code: 's', Text: "s", Mod: tea.ModCtrl}
+	case "enter":
+		return tea.KeyPressMsg{Code: tea.KeyEnter, Text: "enter"}
+	case "esc":
+		return tea.KeyPressMsg{Code: tea.KeyEsc, Text: "esc"}
+	}
 	if len(s) == 1 {
 		return tea.KeyPressMsg{Code: rune(s[0]), Text: s}
 	}
 	return tea.KeyPressMsg{Text: s}
-}
-
-func keyType(code rune) tea.KeyPressMsg {
-	return tea.KeyPressMsg{Code: code}
 }
