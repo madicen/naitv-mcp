@@ -118,7 +118,7 @@ func TestServer_GetPrompts(t *testing.T) {
 		}
 		names = append(names, p.Name)
 	}
-	if !contains(stringsJoin(names, ","), "load-context") || !contains(stringsJoin(names, ","), "propose-learning") {
+	if !contains(strings.Join(names, ","), "load-context") || !contains(strings.Join(names, ","), "propose-learning") {
 		t.Fatalf("expected load-context and propose-learning prompts, got %v", names)
 	}
 
