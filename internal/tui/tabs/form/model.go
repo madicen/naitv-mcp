@@ -347,6 +347,8 @@ func (m Model) updateFocusedField(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 		}
 	case 1:
+		m.rebuildHuhForm()
+		m.activateHuh()
 		if m.huhForm != nil {
 			updated, huhCmd := m.huhForm.Update(msg)
 			if f, ok := updated.(*huh.Form); ok {
@@ -384,6 +386,7 @@ func (m *Model) applyFocus() {
 		}
 		m.syncKindFocus()
 	case 1:
+		m.rebuildHuhForm()
 		m.activateHuh()
 	default:
 		fieldBase := 2
