@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/madicen/naitv-mcp/internal/store"
+	"github.com/madicen/naitv-mcp/internal/xpath"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -36,7 +37,7 @@ type UninstallResult struct {
 func Install(st *store.Store, source string) (*InstallResult, error) {
 	// Resolve a plain name to a URL via the default registry.
 	resolvedSource := source
-	if !isHTTP(source) && !isFilePath(source) {
+	if !xpath.IsHTTP(source) && !xpath.IsFilePath(source) {
 		reg, err := LoadRegistry(DefaultRegistryURL)
 		if err != nil {
 			return nil, fmt.Errorf("registry lookup for %q: %w", source, err)
@@ -157,12 +158,4 @@ func Uninstall(st *store.Store, name string) (*UninstallResult, error) {
 	}
 	_ = st.Delete(track.ID)
 	return result, nil
-}
-
-// isFilePath reports whether s is a local file system path.
-func isFilePath(s string) bool {
-	return strings.HasPrefix(s, "/") ||
-		strings.HasPrefix(s, "./") ||
-		strings.HasPrefix(s, "../") ||
-		strings.HasPrefix(s, "~/")
 }
