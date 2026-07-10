@@ -10,6 +10,7 @@ import (
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
 	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/markdown"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -34,6 +35,8 @@ type Model struct {
 	detail listpane.Detail
 	sel    listpane.Selection
 	keys   keymap.Review
+	md     *markdown.Renderer
+	renderMarkdown bool
 }
 
 // NewModel creates a new review Model.
@@ -42,6 +45,7 @@ func NewModel(zm *zone.Manager) Model {
 		zoneManager: zm,
 		detail:      listpane.NewDetail(),
 		keys:        keymap.DefaultReview,
+		md:          markdown.NewRenderer(80),
 	}
 }
 
@@ -124,6 +128,9 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		case key.Matches(msg, m.keys.Back):
 			req = &Request{SwitchToEntries: true}
+		case key.Matches(msg, m.keys.ToggleMarkdown):
+			m.renderMarkdown = !m.renderMarkdown
+			m.updateViewport()
 		}
 
 	case tea.MouseClickMsg:
@@ -181,6 +188,9 @@ func (m *Model) SetDimensions(w, h int) {
 	m.height = h
 	m.pane = listpane.Compute(w, h, layout.ReviewFooterRows+2, 1)
 	m.detail.Resize(m.pane)
+	if m.md != nil {
+		m.md.SetWidth(m.pane.DetailVPW)
+	}
 	m.updateViewport()
 }
 
@@ -209,11 +219,11 @@ func (m *Model) updateViewport() {
 		m.detail.SetContent("No proposals.")
 		return
 	}
-	m.detail.SetContent(formatProposalDetail(*p))
+	m.detail.SetContent(m.formatProposalDetail(*p))
 }
 
 // formatProposalDetail formats a proposal for the detail pane.
-func formatProposalDetail(p entry.Entry) string {
+func (m *Model) formatProposalDetail(p entry.Entry) string {
 	var sb strings.Builder
 
 	// Warn before anything else when the proposal would register a shell command.
@@ -268,7 +278,13 @@ func formatProposalDetail(p entry.Entry) string {
 			}
 		}
 		if p.Body != "" {
-			sb.WriteString("\nBody:\n" + p.Body + "\n")
+			sb.WriteString("\nBody")
+			if m.renderMarkdown {
+				sb.WriteString(" (rendered, m=toggle):\n")
+				sb.WriteString(m.md.RenderBody(p.ID, p.Body))
+			} else {
+				sb.WriteString(" (raw, m=toggle):\n" + p.Body + "\n")
+			}
 		}
 	}
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -57,7 +58,11 @@ END;
 
 // Store wraps a SQLite database for single-goroutine use.
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	dbPath string
+
+	onChangeMu sync.Mutex
+	onChange   []func()
 }
 
 // DefaultDBPath returns ~/.config/naitv-mcp/context.db, or the value of
@@ -90,7 +95,40 @@ func Open(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, dbPath: dbPath}, nil
+}
+
+// DBPath returns the filesystem path of the SQLite database.
+func (s *Store) DBPath() string {
+	return s.dbPath
+}
+
+// ModTime returns the last modification time of the database file.
+func (s *Store) ModTime() (time.Time, error) {
+	if s.dbPath == "" {
+		return time.Time{}, nil
+	}
+	info, err := os.Stat(s.dbPath)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return info.ModTime(), nil
+}
+
+// OnChange registers fn to be called after mutating store operations.
+func (s *Store) OnChange(fn func()) {
+	s.onChangeMu.Lock()
+	defer s.onChangeMu.Unlock()
+	s.onChange = append(s.onChange, fn)
+}
+
+func (s *Store) notifyChange() {
+	s.onChangeMu.Lock()
+	fns := append([]func(){}, s.onChange...)
+	s.onChangeMu.Unlock()
+	for _, fn := range fns {
+		fn()
+	}
 }
 
 type execer interface {
@@ -337,6 +375,7 @@ func (s *Store) Create(e entry.Entry) (entry.Entry, error) {
 	if err := insertEntry(s.db, e, string(e.Status), nil); err != nil {
 		return entry.Entry{}, fmt.Errorf("store: create: %w", err)
 	}
+	s.notifyChange()
 	return e, nil
 }
 
@@ -391,6 +430,7 @@ func (s *Store) Update(e entry.Entry) (entry.Entry, error) {
 	if n == 0 {
 		return entry.Entry{}, fmt.Errorf("store: update: not found: %s", e.ID)
 	}
+	s.notifyChange()
 	return e, nil
 }
 
@@ -419,6 +459,7 @@ func (s *Store) SetDelivery(id string, d entry.Delivery) error {
 	if n == 0 {
 		return fmt.Errorf("store: set delivery: not found: %s", id)
 	}
+	s.notifyChange()
 	return nil
 }
 
@@ -443,6 +484,7 @@ func (s *Store) Delete(id string) error {
 	if n == 0 {
 		return fmt.Errorf("store: delete: not found: %s", id)
 	}
+	s.notifyChange()
 	return nil
 }
 
@@ -457,6 +499,7 @@ func (s *Store) Purge(id string) error {
 		return fmt.Errorf("store: purge: not found: %s", id)
 	}
 	_, _ = s.db.Exec(`DELETE FROM entry_history WHERE entry_id = ?`, id)
+	s.notifyChange()
 	return nil
 }
 
@@ -473,6 +516,7 @@ func (s *Store) CreatePending(e entry.Entry) (entry.Entry, error) {
 	if err := insertEntry(s.db, e, string(e.Status), e.ProposedAt); err != nil {
 		return entry.Entry{}, fmt.Errorf("store: create pending: %w", err)
 	}
+	s.notifyChange()
 	return e, nil
 }
 
@@ -512,7 +556,12 @@ func (s *Store) PendingCount() (int, error) {
 // If target_id == "": creates a new active entry from proposal fields.
 // If target_id != "": merges non-empty proposal fields into the target entry, then deletes proposal.
 func (s *Store) Approve(proposalID string) (entry.Entry, error) {
-	return s.approve(s.db, proposalID)
+	e, err := s.approve(s.db, proposalID)
+	if err != nil {
+		return entry.Entry{}, err
+	}
+	s.notifyChange()
+	return e, nil
 }
 
 func (s *Store) approve(db execer, proposalID string) (entry.Entry, error) {
@@ -666,5 +715,6 @@ func (s *Store) ApproveAll() ([]entry.Entry, error) {
 	if err := tx.Commit(); err != nil {
 		return results, fmt.Errorf("store: approve all commit: %w", err)
 	}
+	s.notifyChange()
 	return results, nil
 }

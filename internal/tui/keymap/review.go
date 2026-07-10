@@ -4,7 +4,7 @@ import "charm.land/bubbles/v2/key"
 
 // Review holds key bindings for the review tab.
 type Review struct {
-	Down, Up, Approve, Reject, Edit, ApproveAll, Back key.Binding
+	Down, Up, Approve, Reject, Edit, ApproveAll, Back, ToggleMarkdown key.Binding
 }
 
 // DefaultReview is the default review tab keymap.
@@ -36,6 +36,10 @@ var DefaultReview = Review{
 	Back: key.NewBinding(
 		key.WithKeys("esc"),
 		key.WithHelp("esc", "entries"),
+	),
+	ToggleMarkdown: key.NewBinding(
+		key.WithKeys("m"),
+		key.WithHelp("m", "markdown"),
 	),
 }
 

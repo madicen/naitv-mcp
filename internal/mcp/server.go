@@ -28,6 +28,8 @@ func Run(st *store.Store) error {
 func NewServer(st *store.Store) *sdkmcp.Server {
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "naitv-mcp", Version: Version}, nil)
 	registerStaticTools(server, st)
+	registerResources(server, st)
+	wireResourceNotifications(server, st)
 	if err := registerDynamicTools(server, st); err != nil {
 		fmt.Fprintf(os.Stderr, "naitv-mcp: dynamic tools: %v\n", err)
 	}

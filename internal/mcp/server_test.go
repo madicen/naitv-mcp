@@ -22,12 +22,8 @@ func openTestStore(t *testing.T) *store.Store {
 	return s
 }
 
-func TestServer_InitializeHandshake(t *testing.T) {
-	st := openTestStore(t)
-	if _, err := st.Create(entry.Entry{Kind: "rule", Name: "use-jj", Body: "Use jj for version control."}); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
+func connectTestClient(t *testing.T, st *store.Store) (*sdkmcp.ClientSession, context.Context) {
+	t.Helper()
 	ctx := context.Background()
 	server := mcp.NewServer(st)
 
@@ -35,13 +31,22 @@ func TestServer_InitializeHandshake(t *testing.T) {
 	if _, err := server.Connect(ctx, stTransport, nil); err != nil {
 		t.Fatalf("server connect: %v", err)
 	}
-
 	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "test"}, nil)
 	session, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
 	}
-	defer session.Close()
+	t.Cleanup(func() { session.Close() })
+	return session, ctx
+}
+
+func TestServer_InitializeHandshake(t *testing.T) {
+	st := openTestStore(t)
+	if _, err := st.Create(entry.Entry{Kind: "rule", Name: "use-jj", Body: "Use jj for version control."}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	session, ctx := connectTestClient(t, st)
 
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
 		Name:      "initialize",
@@ -62,21 +67,48 @@ func TestServer_InitializeHandshake(t *testing.T) {
 	}
 }
 
+func TestServer_ReadResources(t *testing.T) {
+	st := openTestStore(t)
+	created, err := st.Create(entry.Entry{Kind: "rule", Name: "use-jj", Body: "Use jj for version control."})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	session, ctx := connectTestClient(t, st)
+
+	bundle, err := session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: "naitv://bundle"})
+	if err != nil {
+		t.Fatalf("ReadResource bundle: %v", err)
+	}
+	if len(bundle.Contents) == 0 {
+		t.Fatal("expected bundle contents")
+	}
+	bundleText := bundle.Contents[0].Text
+	if !contains(bundleText, "use-jj") {
+		t.Errorf("bundle missing entry: %q", bundleText)
+	}
+
+	entryURI := "naitv://entry/" + created.ID
+	got, err := session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: entryURI})
+	if err != nil {
+		t.Fatalf("ReadResource entry: %v", err)
+	}
+	if len(got.Contents) == 0 {
+		t.Fatal("expected entry contents")
+	}
+	if !contains(got.Contents[0].Text, "use-jj") {
+		t.Errorf("entry resource missing name: %q", got.Contents[0].Text)
+	}
+
+	_, err = session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: "naitv://entry/nonexistent"})
+	if err == nil {
+		t.Fatal("expected error for missing entry resource")
+	}
+}
+
 func TestServer_ListEntriesErrorPath(t *testing.T) {
 	st := openTestStore(t)
-	ctx := context.Background()
-	server := mcp.NewServer(st)
-
-	ct, stTransport := sdkmcp.NewInMemoryTransports()
-	if _, err := server.Connect(ctx, stTransport, nil); err != nil {
-		t.Fatalf("server connect: %v", err)
-	}
-	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "test"}, nil)
-	session, err := client.Connect(ctx, ct, nil)
-	if err != nil {
-		t.Fatalf("client connect: %v", err)
-	}
-	defer session.Close()
+	session, ctx := connectTestClient(t, st)
 
 	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
 		Name:      "get_entry",

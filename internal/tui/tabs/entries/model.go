@@ -12,6 +12,7 @@ import (
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
 	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/markdown"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -69,6 +70,8 @@ type Model struct {
 	// kindDD is the kind-filter dropdown (replaces the old pill row).
 	kindDD *dropdownv2.Dropdown
 	keys   keymap.Entries
+	md     *markdown.Renderer
+	renderMarkdown bool
 	// contentTop is the absolute terminal row where the entries content begins
 	// (the tab-bar height). Mouse events are translated by this offset before
 	// reaching an open dropdown's geometric hit-test, since the dropdown panel
@@ -88,6 +91,7 @@ func NewModel(zm *zone.Manager) Model {
 		detail:      listpane.NewDetail(),
 		collapsed:   make(map[string]bool),
 		keys:        keymap.DefaultEntries,
+		md:          markdown.NewRenderer(80),
 	}
 }
 
@@ -257,6 +261,9 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 				m.kindDD, cmd = m.kindDD.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			}
 			return m, nil, cmd
+		case key.Matches(msg, m.keys.ToggleMarkdown):
+			m.renderMarkdown = !m.renderMarkdown
+			m.updateViewport()
 		}
 
 	case tea.MouseClickMsg:
@@ -324,6 +331,9 @@ func (m *Model) SetDimensions(w, h int) {
 	m.height = h
 	m.pane = listpane.Compute(w, h, layout.EntriesFooterRows+2, 0)
 	m.detail.Resize(m.pane)
+	if m.md != nil {
+		m.md.SetWidth(m.pane.DetailVPW)
+	}
 	m.updateViewport()
 }
 
@@ -473,11 +483,11 @@ func (m *Model) updateViewport() {
 		m.detail.SetContent("No entries.")
 		return
 	}
-	m.detail.SetContent(formatEntryDetail(*sel))
+	m.detail.SetContent(m.formatEntryDetail(*sel))
 }
 
 // formatEntryDetail formats an entry for the detail pane.
-func formatEntryDetail(e entry.Entry) string {
+func (m *Model) formatEntryDetail(e entry.Entry) string {
 	var sb strings.Builder
 	sb.WriteString("Kind:   " + e.Kind + "\n")
 	sb.WriteString("Name:   " + e.Name + "\n")
@@ -493,7 +503,13 @@ func formatEntryDetail(e entry.Entry) string {
 		}
 	}
 	if e.Body != "" {
-		sb.WriteString("\nBody:\n" + e.Body + "\n")
+		sb.WriteString("\nBody")
+		if m.renderMarkdown {
+			sb.WriteString(" (rendered, m=toggle):\n")
+			sb.WriteString(m.md.RenderBody(e.ID, e.Body))
+		} else {
+			sb.WriteString(" (raw, m=toggle):\n" + e.Body + "\n")
+		}
 	}
 	sb.WriteString("\nCreated: " + e.CreatedAt.Format("2006-01-02 15:04:05") + "\n")
 	sb.WriteString("Updated: " + e.UpdatedAt.Format("2006-01-02 15:04:05") + "\n")
