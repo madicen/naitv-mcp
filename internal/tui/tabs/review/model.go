@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
@@ -12,6 +13,7 @@ import (
 	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/markdown"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -40,16 +42,27 @@ type Model struct {
 	keys   keymap.Review
 	md     *markdown.Renderer
 	renderMarkdown bool
+	loading bool
+	spin    spinner.Model
 }
 
 // NewModel creates a new review Model.
 func NewModel(zm *zone.Manager) Model {
+	spin := spinner.New()
+	spin.Spinner = spinner.Dot
+	spin.Style = theme.DimStyle
 	return Model{
 		zoneManager: zm,
 		detail:      listpane.NewDetail(),
 		keys:        keymap.DefaultReview,
 		md:          markdown.NewRenderer(80),
+		spin:        spin,
 	}
+}
+
+func (m *Model) startLoading() tea.Cmd {
+	m.loading = true
+	return m.spin.Tick
 }
 
 // Init returns the initial command.
@@ -63,6 +76,13 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	var req *Request
 
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		if m.loading {
+			m.spin, cmd = m.spin.Update(msg)
+			return m, nil, cmd
+		}
+		return m, nil, nil
+
 	case ProposalsLoadedMsg:
 		m.proposals = msg.Proposals
 		m.sel.Clamp(len(m.proposals))
@@ -99,6 +119,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		return m, nil, nil
 
 	case AllApprovedMsg:
+		m.loading = false
 		m.proposals = nil
 		m.sel.Index = 0
 		m.updateViewport()
@@ -137,6 +158,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		case key.Matches(msg, m.keys.ApproveAll):
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveAll: true}
+				return m, req, m.startLoading()
 			}
 		case key.Matches(msg, m.keys.Back):
 			req = &Request{SwitchToEntries: true}
@@ -161,6 +183,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		} else if m.zoneManager.Get(zones.ReviewApproveAll).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveAll: true}
+				return m, req, m.startLoading()
 			}
 		} else if m.zoneManager.Get(zones.ReviewDetailApprove).InBounds(msg) {
 			if len(m.proposals) > 0 {

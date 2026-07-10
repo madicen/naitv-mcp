@@ -19,6 +19,9 @@ func (m *Model) View() string {
 
 	split := renderReviewSplit(m)
 	actionBar := renderReviewActionBar(m)
+	if m.loading {
+		actionBar += "\n" + m.spin.View() + theme.DimStyle.Render(" Approving all…")
+	}
 
 	return strings.Join([]string{split, actionBar}, "\n")
 }
