@@ -8,9 +8,6 @@ import (
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 )
 
-// kindDDZone is the bubblezone ID for the kind-filter dropdown trigger.
-const kindDDZone = "entries:kind-dd"
-
 // kindFilterAll is the label for the "show all kinds" option (always index 0).
 const kindFilterAll = "All"
 

@@ -5,26 +5,11 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
-)
-
-var (
-	styleSelected       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	styleNormal         = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	styleDim            = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	stylePane           = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
-	styleActionBtn      = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Padding(0, 1)
-	styleConfirm        = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("196"))
-	styleSearch         = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Padding(0, 1)
-	styleInit           = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	styleOnDemand       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	styleExecTool       = lipgloss.NewStyle().Foreground(lipgloss.Color("214")) // amber ⚡
-	styleGroupHeader    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))  // cyan
-	styleGroupHeaderSel = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")) // pink (selected)
-	styleGroupCount     = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
 // kindFilterLabel prefixes the kind-filter dropdown trigger; its display width
@@ -43,7 +28,7 @@ func (m *Model) View() string {
 
 	kindRow := renderKindFilter(m)
 	split := renderSplit(m)
-	actionBar := renderActionBar(m, m.zoneManager)
+	actionBar := renderActionBar(m)
 
 	var rows []string
 	rows = append(rows, kindRow)
@@ -72,8 +57,8 @@ func (m *Model) View() string {
 // renderKindFilter renders the kind-filter label followed by the dropdown
 // trigger (marked for mouse hit-testing).
 func renderKindFilter(m *Model) string {
-	trigger := m.zoneManager.Mark(kindDDZone, m.kindDD.TriggerView())
-	return styleDim.Render(kindFilterLabel) + trigger
+	trigger := m.zoneManager.Mark(zones.EntriesKindDD, m.kindDD.TriggerView())
+	return theme.DimStyle.Render(kindFilterLabel) + trigger
 }
 
 // renderSplit renders the left+right split pane.
@@ -104,11 +89,11 @@ func renderList(m *Model, width, height int) string {
 		} else {
 			rendered = renderEntryRow(item.e, selected, innerW, hasGroups)
 		}
-		rows = append(rows, m.zoneManager.Mark(flatItemZone(i), rendered))
+		rows = append(rows, m.zoneManager.Mark(zones.EntriesRow(i), rendered))
 	}
 
 	if len(rows) == 0 {
-		rows = append(rows, styleDim.Render("  No entries"))
+		rows = append(rows, theme.DimStyle.Render("  No entries"))
 	}
 
 	// Pad to height.
@@ -120,7 +105,7 @@ func renderList(m *Model, width, height int) string {
 	}
 
 	content := strings.Join(rows, "\n")
-	return stylePane.Width(innerW).Height(innerH).Render(content)
+	return theme.Pane.Width(innerW).Height(innerH).Render(content)
 }
 
 // renderGroupHeader renders one collapsible group header row.
@@ -136,7 +121,7 @@ func renderGroupHeader(m *Model, item listItem, selected bool, width int) string
 		label = "General"
 	}
 
-	count := styleGroupCount.Render(fmt.Sprintf("(%d)", item.count))
+	count := theme.GroupCount.Render(fmt.Sprintf("(%d)", item.count))
 
 	// Reserve: 2 (indent) + 2 (chevron + space).
 	textW := width - 4
@@ -146,9 +131,9 @@ func renderGroupHeader(m *Model, item listItem, selected bool, width int) string
 	label = layout.Truncate(label, textW)
 
 	if selected {
-		return "  " + styleGroupHeaderSel.Render(chevron+" "+label) + " " + count
+		return "  " + theme.GroupHeaderSel.Render(chevron+" "+label) + " " + count
 	}
-	return "  " + styleGroupHeader.Render(chevron+" "+label) + " " + count
+	return "  " + theme.GroupHeader.Render(chevron+" "+label) + " " + count
 }
 
 // renderEntryRow renders one entry row, optionally indented under a group header.
@@ -167,7 +152,7 @@ func renderEntryRow(e entry.Entry, selected bool, width int, indented bool) stri
 
 	badge := ""
 	if e.Kind != "" {
-		badge = styleDim.Render("[" + e.Kind + "] ")
+		badge = theme.DimStyle.Render("[" + e.Kind + "] ")
 	}
 	label := e.Name
 	line := badge + label
@@ -176,16 +161,16 @@ func renderEntryRow(e entry.Entry, selected bool, width int, indented bool) stri
 	glyph := deliveryGlyph(e)
 
 	if selected {
-		return indent + styleSelected.Render("▶ ") + glyph + " " + styleSelected.Render(line)
+		return indent + theme.Selected.Render("▶ ") + glyph + " " + theme.Selected.Render(line)
 	}
-	return indent + styleNormal.Render("  ") + glyph + " " + styleNormal.Render(line)
+	return indent + theme.TextStyle.Render("  ") + glyph + " " + theme.TextStyle.Render(line)
 }
 
 // renderDetail renders the selected entry detail in the right pane.
 func renderDetail(m *Model, width, height int) string {
 	innerW, innerH := layout.ViewportSize(width, height)
 	content := m.viewport.View()
-	return stylePane.Width(innerW).Height(innerH).Render(content)
+	return theme.Pane.Width(innerW).Height(innerH).Render(content)
 }
 
 // deliveryGlyph renders a styled glyph indicating an entry's delivery mode
@@ -196,23 +181,23 @@ func renderDetail(m *Model, width, height int) string {
 //   - ○ grey   — on-demand (agent must fetch explicitly)
 func deliveryGlyph(e entry.Entry) string {
 	if tools.IsExecutable(e) {
-		return styleExecTool.Render("⚡")
+		return theme.ExecToolGlyph.Render("⚡")
 	}
 	if e.DeliveryOrDefault() == entry.DeliveryOnDemand {
-		return styleOnDemand.Render("○")
+		return theme.OnDemandGlyph.Render("○")
 	}
-	return styleInit.Render("●")
+	return theme.InitGlyph.Render("●")
 }
 
 // renderActionBar renders the action buttons at the bottom.
-func renderActionBar(m *Model, zm *zone.Manager) string {
-	newBtn := zm.Mark("action:new", styleActionBtn.Render("[ n New ]"))
-	editBtn := zm.Mark("action:edit", styleActionBtn.Render("[ e Edit ]"))
-	deleteBtn := zm.Mark("action:delete", styleActionBtn.Render("[ d Delete ]"))
-	deliveryBtn := zm.Mark("action:delivery", styleActionBtn.Render("[ i Init/Ask ]"))
-	copyBtn := zm.Mark("action:copy", styleActionBtn.Render("[ c Copy ]"))
-	searchBtn := zm.Mark("action:search", styleActionBtn.Render("[ / Search ]"))
-	reviewBtn := zm.Mark("action:review", styleActionBtn.Render("[ R Review ]"))
+func renderActionBar(m *Model) string {
+	newBtn := m.zoneManager.Mark(zones.EntriesNew, theme.ActionBtn.Render("[ n New ]"))
+	editBtn := m.zoneManager.Mark(zones.EntriesEdit, theme.ActionBtn.Render("[ e Edit ]"))
+	deleteBtn := m.zoneManager.Mark(zones.EntriesDelete, theme.ActionBtn.Render("[ d Delete ]"))
+	deliveryBtn := m.zoneManager.Mark(zones.EntriesDelivery, theme.ActionBtn.Render("[ i Init/Ask ]"))
+	copyBtn := m.zoneManager.Mark(zones.EntriesCopy, theme.ActionBtn.Render("[ c Copy ]"))
+	searchBtn := m.zoneManager.Mark(zones.EntriesSearch, theme.ActionBtn.Render("[ / Search ]"))
+	reviewBtn := m.zoneManager.Mark(zones.EntriesReview, theme.ActionBtn.Render("[ R Review ]"))
 
 	return lipgloss.JoinHorizontal(lipgloss.Top,
 		newBtn, editBtn, deleteBtn, deliveryBtn, copyBtn, searchBtn, reviewBtn,
@@ -221,10 +206,10 @@ func renderActionBar(m *Model, zm *zone.Manager) string {
 
 // renderConfirmDelete renders the delete confirmation prompt.
 func renderConfirmDelete(m *Model) string {
-	return styleConfirm.Render("Delete entry? [y]es / [n]o / [esc] cancel")
+	return theme.Confirm.Render("Delete entry? [y]es / [n]o / [esc] cancel")
 }
 
 // renderSearchBar renders the search input bar.
 func renderSearchBar(m *Model) string {
-	return styleSearch.Render("Search: " + m.searchInput.View())
+	return theme.SearchBar.Render("Search: " + m.searchInput.View())
 }

@@ -1,7 +1,6 @@
 package form
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -9,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -304,21 +304,21 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.MouseClickMsg:
 		// A click on the Kind trigger opens the dropdown (even from new-kind
 		// mode, so the user can switch back to an existing kind).
-		if m.kindDD != nil && m.zoneManager.Get(kindDDZone).InBounds(msg) {
+		if m.kindDD != nil && m.zoneManager.Get(zones.FormKindDD).InBounds(msg) {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 			return m, cmd
 		}
-		if m.zoneManager.Get("form:save").InBounds(msg) {
+		if m.zoneManager.Get(zones.FormSave).InBounds(msg) {
 			e := m.ToEntry()
 			pid := m.proposalID
 			return m, func() tea.Msg { return SaveMsg{E: e, ProposalID: pid} }
-		} else if m.zoneManager.Get("form:cancel").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.FormCancel).InBounds(msg) {
 			return m, func() tea.Msg { return CancelMsg{} }
-		} else if m.zoneManager.Get("form:add-field").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.FormAddFld).InBounds(msg) {
 			m.addField()
 		} else {
 			for i := range m.fields {
-				if m.zoneManager.Get(removeFieldZone(i)).InBounds(msg) {
+				if m.zoneManager.Get(zones.FormRemoveField(i)).InBounds(msg) {
 					m.removeField(i)
 					break
 				}
@@ -448,9 +448,4 @@ func (m *Model) removeField(i int) {
 		m.focusIdx = total - 1
 	}
 	m.applyFocus()
-}
-
-// removeFieldZone returns the zone ID for removing a field.
-func removeFieldZone(i int) string {
-	return fmt.Sprintf("form:remove-field:%d", i)
 }

@@ -1,7 +1,6 @@
 package entries
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -11,6 +10,7 @@ import (
 	zone "github.com/lrstanley/bubblezone/v2"
 	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -260,39 +260,39 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	case tea.MouseClickMsg:
 		// A click on the kind-filter trigger opens the dropdown (the panel is
 		// then routed all events by the open-guard at the top of Update).
-		if m.kindDD != nil && m.zoneManager.Get(kindDDZone).InBounds(msg) {
+		if m.kindDD != nil && m.zoneManager.Get(zones.EntriesKindDD).InBounds(msg) {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 			return m, nil, cmd
 		}
 
-		if m.zoneManager.Get("action:new").InBounds(msg) {
+		if m.zoneManager.Get(zones.EntriesNew).InBounds(msg) {
 			req = &Request{OpenNewForm: true}
-		} else if m.zoneManager.Get("action:edit").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesEdit).InBounds(msg) {
 			if m.SelectedEntry() != nil {
 				req = &Request{OpenEditForm: true}
 			}
-		} else if m.zoneManager.Get("action:delete").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesDelete).InBounds(msg) {
 			sel := m.SelectedEntry()
 			if sel != nil {
 				m.showConfirmDelete = true
 				m.deleteTargetID = sel.ID
 			}
-		} else if m.zoneManager.Get("action:delivery").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesDelivery).InBounds(msg) {
 			if m.SelectedEntry() != nil {
 				req = &Request{ToggleDelivery: true}
 			}
-		} else if m.zoneManager.Get("action:copy").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesCopy).InBounds(msg) {
 			if m.SelectedEntry() != nil {
 				req = &Request{CopyBody: true}
 			}
-		} else if m.zoneManager.Get("action:search").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesSearch).InBounds(msg) {
 			m.searchMode = true
 			m.searchInput.Focus()
-		} else if m.zoneManager.Get("action:review").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesReview).InBounds(msg) {
 			req = &Request{SwitchToReview: true}
 		} else {
 			for i, item := range m.flatItems {
-				if m.zoneManager.Get(flatItemZone(i)).InBounds(msg) {
+				if m.zoneManager.Get(zones.EntriesRow(i)).InBounds(msg) {
 					if item.kind == itemKindHeader {
 						// Clicking a header toggles its group.
 						m.collapsed[item.groupName] = !m.collapsed[item.groupName]
@@ -498,10 +498,6 @@ func formatEntryDetail(e entry.Entry) string {
 	sb.WriteString("\nCreated: " + e.CreatedAt.Format("2006-01-02 15:04:05") + "\n")
 	sb.WriteString("Updated: " + e.UpdatedAt.Format("2006-01-02 15:04:05") + "\n")
 	return sb.String()
-}
-
-func flatItemZone(i int) string {
-	return fmt.Sprintf("flat:%d", i)
 }
 
 // deliveryLabel describes an entry's delivery mode for the detail pane.

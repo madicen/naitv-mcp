@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -129,37 +130,37 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		}
 
 	case tea.MouseClickMsg:
-		if m.zoneManager.Get("action:approve").InBounds(msg) {
+		if m.zoneManager.Get(zones.ReviewApprove).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveSelected: true}
 			}
-		} else if m.zoneManager.Get("action:reject").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewReject).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{RejectSelected: true}
 			}
-		} else if m.zoneManager.Get("action:edit-review").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewEdit).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{EditSelected: true}
 			}
-		} else if m.zoneManager.Get("action:approve-all").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewApproveAll).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveAll: true}
 			}
-		} else if m.zoneManager.Get("detail:approve").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewDetailApprove).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveSelected: true}
 			}
-		} else if m.zoneManager.Get("detail:reject").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewDetailReject).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{RejectSelected: true}
 			}
-		} else if m.zoneManager.Get("detail:edit").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewDetailEdit).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{EditSelected: true}
 			}
 		} else {
 			for i := range m.proposals {
-				if m.zoneManager.Get(proposalRowZone(i)).InBounds(msg) {
+				if m.zoneManager.Get(zones.ReviewRow(i)).InBounds(msg) {
 					m.selectedIdx = i
 					m.updateViewport()
 					break
@@ -282,10 +283,6 @@ func formatProposalDetail(p entry.Entry) string {
 	sb.WriteString("[ ✓ Approve (a) ]  [ ✗ Reject (r) ]  [ ✎ Edit (e) ]\n")
 
 	return sb.String()
-}
-
-func proposalRowZone(i int) string {
-	return fmt.Sprintf("proposal:%d", i)
 }
 
 func intMax(a, b int) int {

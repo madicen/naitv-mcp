@@ -10,15 +10,12 @@ import (
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 )
 
-// kindDDZone is the bubblezone ID for the Kind dropdown trigger.
-const kindDDZone = "form:kind-dd"
-
 // newKindOption is the sentinel option (always last) that switches the form
 // into free-text "new kind" mode.
 const newKindOption = "+ New kind…"
 
 // kindLabelWidth is the rendered width of the "Kind:" label column. It must
-// match styleLabel's Width so the dropdown trigger's computed bounds line up
+// match theme.FormLabel's Width so the dropdown trigger's computed bounds line up
 // with where the trigger is actually drawn.
 const kindLabelWidth = 10
 

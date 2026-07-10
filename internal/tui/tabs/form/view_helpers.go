@@ -1,22 +1,11 @@
 package form
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
-)
-
-var (
-	styleTitle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Padding(0, 1)
-	styleLabel     = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Width(10)
-	styleInputBox  = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("240")).Padding(0, 1)
-	styleFocused   = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("205")).Padding(0, 1)
-	styleFormPanel = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("205")).Padding(1, 2)
-	styleBtn       = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Padding(0, 1).Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("39"))
-	styleBtnActive = lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Background(lipgloss.Color("39")).Padding(0, 1).Border(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("39"))
-	styleRemoveBtn = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Padding(0, 1)
-	styleDimLabel  = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 )
 
 // View renders the form as a string suitable for use as an overlay modal.
@@ -72,7 +61,7 @@ func (m *Model) View() string {
 	case ModeEditProposal:
 		title = "Edit Proposal (then Approve)"
 	}
-	lines = append(lines, styleTitle.Render(title))
+	lines = append(lines, theme.Title.Render(title))
 	lines = append(lines, "")
 
 	// Kind field: a dropdown of existing kinds plus a "+ New kind…" sentinel.
@@ -81,8 +70,8 @@ func (m *Model) View() string {
 	// directly below the trigger.
 	m.kindDDRow = len(lines)
 	if m.kindDD != nil {
-		trigger := m.zoneManager.Mark(kindDDZone, m.kindDD.TriggerView())
-		kindRow := lipgloss.JoinHorizontal(lipgloss.Center, styleLabel.Render("Kind:"), trigger)
+		trigger := m.zoneManager.Mark(zones.FormKindDD, m.kindDD.TriggerView())
+		kindRow := lipgloss.JoinHorizontal(lipgloss.Center, theme.FormLabel.Render("Kind:"), trigger)
 		lines = append(lines, kindRow)
 		if m.newKindMode {
 			lines = append(lines, renderField("New kind", m.kind.View(), m.focusIdx == 0, formW))
@@ -102,7 +91,7 @@ func (m *Model) View() string {
 
 	// Custom fields
 	if len(m.fields) > 0 {
-		lines = append(lines, styleDimLabel.Render("Custom Fields:"))
+		lines = append(lines, theme.FormDimLabel.Render("Custom Fields:"))
 		for i, fp := range m.fields {
 			keyFocused := m.focusIdx == 4+i*2
 			valFocused := m.focusIdx == 4+i*2+1
@@ -112,18 +101,17 @@ func (m *Model) View() string {
 
 			var keyBox, valBox string
 			if keyFocused {
-				keyBox = styleFocused.Width(formW / 3).Render(keyView)
+				keyBox = theme.FormFocused.Width(formW / 3).Render(keyView)
 			} else {
-				keyBox = styleInputBox.Width(formW / 3).Render(keyView)
+				keyBox = theme.FormInput.Width(formW / 3).Render(keyView)
 			}
 			if valFocused {
-				valBox = styleFocused.Width(formW / 2).Render(valView)
+				valBox = theme.FormFocused.Width(formW / 2).Render(valView)
 			} else {
-				valBox = styleInputBox.Width(formW / 2).Render(valView)
+				valBox = theme.FormInput.Width(formW / 2).Render(valView)
 			}
 
-			removeID := fmt.Sprintf("form:remove-field:%d", i)
-			removeBtn := m.zoneManager.Mark(removeID, styleRemoveBtn.Render("[-]"))
+			removeBtn := m.zoneManager.Mark(zones.FormRemoveField(i), theme.FormRemoveBtn.Render("[-]"))
 
 			row := lipgloss.JoinHorizontal(lipgloss.Top, keyBox, " = ", valBox, " ", removeBtn)
 			lines = append(lines, row)
@@ -132,7 +120,7 @@ func (m *Model) View() string {
 
 	// Add field button
 	addFieldFocused := m.focusIdx == m.focusIdxAddField()
-	addFieldBtn := m.zoneManager.Mark("form:add-field", renderButton("+ Add Field", addFieldFocused))
+	addFieldBtn := m.zoneManager.Mark(zones.FormAddFld, renderButton("+ Add Field", addFieldFocused))
 	lines = append(lines, addFieldBtn)
 	lines = append(lines, "")
 
@@ -143,19 +131,19 @@ func (m *Model) View() string {
 	// Save / Cancel buttons
 	saveFocused := m.focusIdx == m.focusIdxSave()
 	cancelFocused := m.focusIdx == m.focusIdxCancel()
-	saveBtn := m.zoneManager.Mark("form:save", renderButton("ctrl+s Save", saveFocused))
-	cancelBtn := m.zoneManager.Mark("form:cancel", renderButton("esc Cancel", cancelFocused))
+	saveBtn := m.zoneManager.Mark(zones.FormSave, renderButton("ctrl+s Save", saveFocused))
+	cancelBtn := m.zoneManager.Mark(zones.FormCancel, renderButton("esc Cancel", cancelFocused))
 	lines = append(lines, lipgloss.JoinHorizontal(lipgloss.Top, saveBtn, "  ", cancelBtn))
 
 	content := strings.Join(lines, "\n")
-	rendered := styleFormPanel.Width(formW).Render(content)
+	rendered := theme.FormPanel.Width(formW).Render(content)
 	m.lastFormView = rendered
 	return rendered
 }
 
 // renderField renders a labeled input field.
 func renderField(label, inputView string, focused bool, width int) string {
-	lbl := styleLabel.Render(label + ":")
+	lbl := theme.FormLabel.Render(label + ":")
 	var box string
 	// Account for the label width (10), the input box's own border (2), and
 	// the form panel's horizontal padding (2+2). Otherwise the row overflows
@@ -166,9 +154,9 @@ func renderField(label, inputView string, focused bool, width int) string {
 		inputW = 10
 	}
 	if focused {
-		box = styleFocused.Width(inputW).Render(inputView)
+		box = theme.FormFocused.Width(inputW).Render(inputView)
 	} else {
-		box = styleInputBox.Width(inputW).Render(inputView)
+		box = theme.FormInput.Width(inputW).Render(inputView)
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Center, lbl, box)
 }
@@ -176,7 +164,7 @@ func renderField(label, inputView string, focused bool, width int) string {
 // renderButton renders a button, highlighted if focused.
 func renderButton(label string, focused bool) string {
 	if focused {
-		return styleBtnActive.Render(label)
+		return theme.FormBtnActive.Render(label)
 	}
-	return styleBtn.Render(label)
+	return theme.FormBtn.Render(label)
 }

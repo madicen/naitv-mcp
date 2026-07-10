@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strconv"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -13,20 +14,14 @@ import (
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/form"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/plugins"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/review"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 )
 
 const (
 	tabEntries = 0
 	tabReview  = 1
 	tabPlugins = 2
-)
-
-var (
-	styleTabBar      = lipgloss.NewStyle().Padding(0, 1)
-	styleTabActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Underline(true).Padding(0, 2)
-	styleTabInactive = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 2)
-	styleBadge       = lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true)
-	styleStatus      = lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Padding(0, 1)
 )
 
 // Model is the root bubbletea model.
@@ -257,16 +252,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Check tab bar zone clicks.
 	if clickMsg, ok := msg.(tea.MouseClickMsg); ok {
-		if m.zoneManager.Get("tab:entries").InBounds(clickMsg) {
+		if m.zoneManager.Get(zones.TabEntries).InBounds(clickMsg) {
 			m.activeTab = tabEntries
 			return m, nil
 		}
-		if m.zoneManager.Get("tab:review").InBounds(clickMsg) {
+		if m.zoneManager.Get(zones.TabReview).InBounds(clickMsg) {
 			m.activeTab = tabReview
 			cmds = append(cmds, review.LoadProposalsCmd(m.store))
 			return m, tea.Batch(cmds...)
 		}
-		if m.zoneManager.Get("tab:plugins").InBounds(clickMsg) {
+		if m.zoneManager.Get(zones.TabPlugins).InBounds(clickMsg) {
 			m.activeTab = tabPlugins
 			cmds = append(cmds, plugins.LoadPluginsCmd(m.store))
 			return m, tea.Batch(cmds...)
@@ -319,7 +314,7 @@ func (m *Model) View() tea.View {
 
 	status := ""
 	if m.statusMsg != "" && time.Now().Before(m.statusExpiry) {
-		status = "\n" + styleStatus.Render(m.statusMsg)
+		status = "\n" + theme.StatusStyle.Render(m.statusMsg)
 	}
 
 	// One blank line separates the tab bar from the active tab's content.
@@ -355,23 +350,23 @@ func (m *Model) renderTabBar() string {
 	entriesLabel := "Entries"
 	reviewLabel := "Review"
 	if m.pendingCount > 0 {
-		reviewLabel = reviewLabel + " " + styleBadge.Render("("+itoa(m.pendingCount)+")")
+		reviewLabel = reviewLabel + " " + theme.BadgeStyle.Render("("+strconv.Itoa(m.pendingCount)+")")
 	}
 	pluginsLabel := "Plugins"
 
-	render := func(label, zone string, active bool) string {
-		style := styleTabInactive
+	render := func(label, zoneID string, active bool) string {
+		style := theme.TabInactive
 		if active {
-			style = styleTabActive
+			style = theme.TabActive
 		}
-		return m.zoneManager.Mark(zone, style.Render(label))
+		return m.zoneManager.Mark(zoneID, style.Render(label))
 	}
 
-	entriesTab := render(entriesLabel, "tab:entries", m.activeTab == tabEntries)
-	reviewTab := render(reviewLabel, "tab:review", m.activeTab == tabReview)
-	pluginsTab := render(pluginsLabel, "tab:plugins", m.activeTab == tabPlugins)
+	entriesTab := render(entriesLabel, zones.TabEntries, m.activeTab == tabEntries)
+	reviewTab := render(reviewLabel, zones.TabReview, m.activeTab == tabReview)
+	pluginsTab := render(pluginsLabel, zones.TabPlugins, m.activeTab == tabPlugins)
 
-	return styleTabBar.Render(lipgloss.JoinHorizontal(lipgloss.Top, entriesTab, reviewTab, pluginsTab))
+	return theme.TabBar.Render(lipgloss.JoinHorizontal(lipgloss.Top, entriesTab, reviewTab, pluginsTab))
 }
 
 // handleEntriesRequest processes requests from the entries tab.
@@ -541,24 +536,3 @@ func (m *Model) loadPendingCount() tea.Cmd {
 
 // pendingCountMsg carries the pending count.
 type pendingCountMsg struct{ count int }
-
-// itoa converts an int to string without importing strconv.
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	neg := false
-	if n < 0 {
-		neg = true
-		n = -n
-	}
-	digits := make([]byte, 0, 10)
-	for n > 0 {
-		digits = append([]byte{byte('0' + n%10)}, digits...)
-		n /= 10
-	}
-	if neg {
-		digits = append([]byte{'-'}, digits...)
-	}
-	return string(digits)
-}

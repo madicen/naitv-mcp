@@ -11,6 +11,7 @@ import (
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -253,7 +254,7 @@ func (m Model) View() string {
 	right := m.renderDetail()
 	bottom := m.renderBottom()
 
-	divider := styleDiv.Render(strings.Repeat("│\n", m.contentH()))
+	divider := theme.PluginDivider.Render(strings.Repeat("│\n", m.contentH()))
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
 	return body + "\n" + bottom
 }
