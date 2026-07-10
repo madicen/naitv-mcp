@@ -93,10 +93,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" || msg.String() == "q" {
-			if !m.form.Visible() && !m.tabs[m.activeTab].InputActive() {
-				return m, tea.Quit
-			}
+		if (msg.Text == "ctrl+c" || msg.Text == "q") && !m.form.Visible() && !m.tabs[m.activeTab].InputActive() {
+			return m, tea.Quit
 		}
 
 	case dropdownv2.ItemChosenMsg, dropdownv2.ItemCanceledMsg:
@@ -287,6 +285,15 @@ func (m *Model) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	return v
+}
+
+// EntriesSelectedName returns the name of the selected entry in the entries tab.
+func (m *Model) EntriesSelectedName() string {
+	e := m.entriesTab().SelectedEntry()
+	if e == nil {
+		return ""
+	}
+	return e.Name
 }
 
 // ZoneManager exposes the bubblezone manager for integration tests.

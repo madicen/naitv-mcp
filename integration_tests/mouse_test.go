@@ -15,7 +15,9 @@ func TestJourney_MouseEntryRowClick(t *testing.T) {
 	m := newTestModel(t, st)
 	m = updateModel(m, entries.LoadEntriesCmd(st, "")())
 	m = clickZone(t, m, zones.EntriesRow(0))
-	if m.View().Content == "" { t.Fatal("expected view") }
+	if got := m.EntriesSelectedName(); got != "clickable-repo" {
+		t.Fatalf("expected selection clickable-repo, got %q", got)
+	}
 }
 
 func TestJourney_MouseTabSwitch(t *testing.T) {
