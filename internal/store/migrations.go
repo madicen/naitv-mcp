@@ -15,6 +15,7 @@ var migrations = []migration{
 	{name: "add entry indices", fn: migrateV2Indices},
 	{name: "unique active entry names", fn: migrateV3UniqueActiveName},
 	{name: "entry history table", fn: migrateV4EntryHistory},
+	{name: "access telemetry columns", fn: migrateV5AccessTelemetry},
 }
 
 func runMigrations(db *sql.DB) error {
@@ -144,6 +145,20 @@ func migrateV4EntryHistory(tx *sql.Tx) error {
 		CREATE INDEX IF NOT EXISTS idx_entry_history_entry_id ON entry_history(entry_id);
 	`)
 	return err
+}
+
+func migrateV5AccessTelemetry(tx *sql.Tx) error {
+	if !hasColumnTx(tx, "entries", "access_count") {
+		if _, err := tx.Exec(`ALTER TABLE entries ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	if !hasColumnTx(tx, "entries", "last_accessed_at") {
+		if _, err := tx.Exec(`ALTER TABLE entries ADD COLUMN last_accessed_at DATETIME`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func hasColumnTx(tx *sql.Tx, table, column string) bool {

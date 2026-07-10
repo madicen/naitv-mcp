@@ -37,6 +37,8 @@ type Entry struct {
 	TargetID   string     // for update proposals: ID of active entry being modified
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	AccessCount    int
+	LastAccessedAt *time.Time
 }
 
 // DeliveryOrDefault returns the entry's delivery mode, defaulting to

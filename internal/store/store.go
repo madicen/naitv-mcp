@@ -220,7 +220,7 @@ func scanEntry(row interface {
 }) (entry.Entry, error) {
 	var e entry.Entry
 	var tagsJSON, fieldsJSON string
-	var proposedAt sql.NullTime
+	var proposedAt, lastAccessed sql.NullTime
 	var status, delivery string
 
 	err := row.Scan(
@@ -229,6 +229,7 @@ func scanEntry(row interface {
 		&status, &delivery,
 		&e.ProposedBy, &proposedAt, &e.TargetID,
 		&e.CreatedAt, &e.UpdatedAt,
+		&e.AccessCount, &lastAccessed,
 	)
 	if err != nil {
 		return entry.Entry{}, err
@@ -255,13 +256,17 @@ func scanEntry(row interface {
 		t := proposedAt.Time
 		e.ProposedAt = &t
 	}
+	if lastAccessed.Valid {
+		t := lastAccessed.Time
+		e.LastAccessedAt = &t
+	}
 
 	return e, nil
 }
 
-const selectCols = `SELECT id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at FROM entries`
+const selectCols = `SELECT id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at, access_count, last_accessed_at FROM entries`
 
-const selectColsNoPrefix = `e.id, e.kind, e.name, e.grp, e.body, e.tags, e.fields, e.status, e.delivery, e.proposed_by, e.proposed_at, e.target_id, e.created_at, e.updated_at`
+const selectColsNoPrefix = `e.id, e.kind, e.name, e.grp, e.body, e.tags, e.fields, e.status, e.delivery, e.proposed_by, e.proposed_at, e.target_id, e.created_at, e.updated_at, e.access_count, e.last_accessed_at`
 
 // List returns active entries, optionally filtered by kind and/or tags.
 // An empty kind means "all kinds". Tags is an AND filter.
