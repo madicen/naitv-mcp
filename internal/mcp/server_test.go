@@ -204,6 +204,34 @@ func TestServer_StaticToolsHappyPaths(t *testing.T) {
 	}
 }
 
+func TestServer_StructuredToolResults(t *testing.T) {
+	st := openTestStore(t)
+	created, err := st.Create(entry.Entry{Kind: "note", Name: "alpha", Body: "body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, ctx := connectTestClient(t, st)
+
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "get_entry",
+		Arguments: map[string]any{"id_or_name": created.ID},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("CallTool: %v %#v", err, res)
+	}
+	if res.StructuredContent == nil {
+		t.Fatal("expected structured content on get_entry")
+	}
+	m, ok := res.StructuredContent.(map[string]any)
+	if !ok {
+		t.Fatalf("structured type = %T", res.StructuredContent)
+	}
+	entryObj, ok := m["entry"].(map[string]any)
+	if !ok || entryObj["name"] != "alpha" {
+		t.Fatalf("structured entry = %#v", m["entry"])
+	}
+}
+
 func TestServer_AddEntryValidation(t *testing.T) {
 	st := openTestStore(t)
 	session, ctx := connectTestClient(t, st)

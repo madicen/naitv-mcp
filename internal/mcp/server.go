@@ -139,7 +139,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 			ids = append(ids, e.ID)
 		}
 		_ = st.RecordAccessBatch(ids)
-		return textResult(instructions.Render(initEntries))
+		return toolResult(instructions.Render(initEntries), structuredEntries(initEntries))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -150,7 +150,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("list_entries error: %v", err)
 		}
-		return textResult(formatEntries(entries))
+		return toolResult(formatEntries(entries), structuredEntries(entries))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -168,7 +168,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 			}
 		}
 		_ = st.RecordAccess(e.ID)
-		return textResult(formatEntry(e))
+		return toolResult(formatEntry(e), map[string]any{"entry": structuredEntry(e)})
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -187,7 +187,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 			ids = append(ids, e.ID)
 		}
 		_ = st.RecordAccessBatch(ids)
-		return textResult(formatEntries(entries))
+		return toolResult(formatEntries(entries), structuredEntries(entries))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -220,7 +220,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("%v", err)
 		}
-		return textResult(text)
+		return toolResult(text, result)
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -250,7 +250,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("%v", err)
 		}
-		return textResult(text)
+		return toolResult(text, result)
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -261,7 +261,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("list_tools error: %v", err)
 		}
-		return textResult(formatToolDefs(defs))
+		return toolResult(formatToolDefs(defs), structuredToolDefs(defs))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -432,7 +432,10 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err := st.ExportJSON(&buf); err != nil {
 			return toolError("export_entries error: %v", err)
 		}
-		return textResult(buf.String())
+		text := buf.String()
+		var structured map[string]any
+		_ = json.Unmarshal([]byte(text), &structured)
+		return toolResult(text, structured)
 	})
 }
 
