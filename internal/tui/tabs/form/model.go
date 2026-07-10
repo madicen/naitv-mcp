@@ -11,6 +11,7 @@ import (
 	zone "github.com/lrstanley/bubblezone/v2"
 	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/components/kinddropdown"
+	"github.com/madicen/naitv-mcp/internal/tui/editor"
 	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -252,6 +253,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg, tea.BackgroundColorMsg:
+		if m.huhForm != nil {
+			updated, huhCmd := m.huhForm.Update(msg)
+			if f, ok := updated.(*huh.Form); ok {
+				m.huhForm = f
+			}
+			return m, huhCmd
+		}
+	case editor.FinishedMsg:
+		if msg.Err == nil {
+			m.huhVals.body = msg.Body
+			m.rebuildHuhForm()
+		}
+		return m, nil
 	case tea.KeyPressMsg:
 		switch {
 		case key.Matches(msg, m.keys.Save):
@@ -260,17 +275,19 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, func() tea.Msg { return SaveMsg{E: e, ProposalID: pid} }
 		case key.Matches(msg, m.keys.Cancel):
 			return m, func() tea.Msg { return CancelMsg{} }
+		case key.Matches(msg, m.keys.EditBody):
+			return m, editor.OpenBodyCmd(m.huhVals.body)
 		case key.Matches(msg, m.keys.Next):
 			m.focusIdx = (m.focusIdx + 1) % m.fieldCount()
 			m.applyFocus()
 			if m.focusIdx == 1 && m.huhForm != nil {
-				return m, m.huhForm.Init()
+				return m, m.huhInitCmd()
 			}
 		case key.Matches(msg, m.keys.Prev):
 			m.focusIdx = (m.focusIdx - 1 + m.fieldCount()) % m.fieldCount()
 			m.applyFocus()
 			if m.focusIdx == 1 && m.huhForm != nil {
-				return m, m.huhForm.Init()
+				return m, m.huhInitCmd()
 			}
 		case key.Matches(msg, m.keys.Submit):
 			if m.focusIdx == m.focusIdxAddField() {
@@ -367,7 +384,7 @@ func (m *Model) applyFocus() {
 		}
 		m.syncKindFocus()
 	case 1:
-		// huh manages its own field focus while this section is active.
+		m.activateHuh()
 	default:
 		fieldBase := 2
 		for i := range m.fields {
@@ -423,4 +440,17 @@ func (m *Model) removeField(i int) {
 		m.focusIdx = total - 1
 	}
 	m.applyFocus()
+}
+
+func (m *Model) huhInitCmd() tea.Cmd {
+	if m.huhForm == nil {
+		return nil
+	}
+	size := func() tea.Msg {
+		return tea.WindowSizeMsg{Width: m.width, Height: m.height}
+	}
+	if m.width == 0 {
+		return m.huhForm.Init()
+	}
+	return tea.Sequence(m.huhForm.Init(), size)
 }

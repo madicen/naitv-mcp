@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
@@ -77,6 +78,33 @@ func (m *Model) syncHuhFromEntry(e entry.Entry) {
 func (m *Model) clearHuhFields() {
 	m.huhVals = huhFields{}
 	m.rebuildHuhForm()
+}
+
+// activateHuh runs huh init synchronously so key input works immediately.
+func (m *Model) activateHuh() {
+	if m.huhForm == nil {
+		return
+	}
+	cmd := m.huhForm.Init()
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			break
+		}
+		var next tea.Cmd
+		updated, next := m.huhForm.Update(msg)
+		if f, ok := updated.(*huh.Form); ok {
+			m.huhForm = f
+		}
+		cmd = next
+	}
+	if m.width > 0 {
+		size := tea.WindowSizeMsg{Width: m.width, Height: m.height}
+		updated, _ := m.huhForm.Update(size)
+		if f, ok := updated.(*huh.Form); ok {
+			m.huhForm = f
+		}
+	}
 }
 
 // naitvTheme maps huh styles to the shared TUI theme colors.

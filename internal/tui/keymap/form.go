@@ -4,7 +4,7 @@ import "charm.land/bubbles/v2/key"
 
 // Form holds key bindings for the entry form modal.
 type Form struct {
-	Save, Cancel, Next, Prev, Submit key.Binding
+	Save, Cancel, Next, Prev, Submit, EditBody key.Binding
 }
 
 // DefaultForm is the default form keymap.
@@ -29,9 +29,13 @@ var DefaultForm = Form{
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "submit"),
 	),
+	EditBody: key.NewBinding(
+		key.WithKeys("ctrl+e"),
+		key.WithHelp("ctrl+e", "edit body"),
+	),
 }
 
 // FormActions returns bindings shown in the form footer.
 func (k Form) FormActions() []key.Binding {
-	return []key.Binding{k.Save, k.Cancel}
+	return []key.Binding{k.Save, k.EditBody, k.Cancel}
 }
