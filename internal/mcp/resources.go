@@ -65,9 +65,3 @@ func registerResources(s *sdkmcp.Server, st *store.Store) {
 	}, readResource)
 }
 
-func wireResourceNotifications(s *sdkmcp.Server, st *store.Store) {
-	st.OnChange(func() {
-		ctx := context.Background()
-		_ = s.ResourceUpdated(ctx, &sdkmcp.ResourceUpdatedNotificationParams{URI: bundleResourceURI})
-	})
-}

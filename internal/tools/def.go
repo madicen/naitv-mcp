@@ -29,7 +29,7 @@
 //
 // Agents may call add_entry with kind="tool" and an exec field, which queues the
 // definition as a pending proposal — just like any other entry. Approve it in the
-// Review tab and it goes live on the next server restart. This is the human-in-the-
+// Review tab and it goes live without restarting the server. This is the human-in-the-
 // loop gate that prevents arbitrary code from being executed without your sign-off.
 package tools
 

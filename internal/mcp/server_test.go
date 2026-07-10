@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/madicen/naitv-mcp/internal/mcp"
 	"github.com/madicen/naitv-mcp/internal/store"
@@ -25,6 +26,11 @@ func openTestStore(t *testing.T) *store.Store {
 
 func connectTestClient(t *testing.T, st *store.Store) (*sdkmcp.ClientSession, context.Context) {
 	t.Helper()
+	return connectTestClientWithOpts(t, st, nil)
+}
+
+func connectTestClientWithOpts(t *testing.T, st *store.Store, opts *sdkmcp.ClientOptions) (*sdkmcp.ClientSession, context.Context) {
+	t.Helper()
 	ctx := context.Background()
 	server := mcp.NewServer(st)
 
@@ -32,7 +38,7 @@ func connectTestClient(t *testing.T, st *store.Store) (*sdkmcp.ClientSession, co
 	if _, err := server.Connect(ctx, stTransport, nil); err != nil {
 		t.Fatalf("server connect: %v", err)
 	}
-	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "test"}, nil)
+	client := sdkmcp.NewClient(&sdkmcp.Implementation{Name: "test-client", Version: "test"}, opts)
 	session, err := client.Connect(ctx, ct, nil)
 	if err != nil {
 		t.Fatalf("client connect: %v", err)
@@ -152,6 +158,227 @@ func TestServer_ListEntriesErrorPath(t *testing.T) {
 	if !res.IsError {
 		t.Fatal("expected error result for missing id_or_name")
 	}
+}
+
+func TestServer_StaticToolsHappyPaths(t *testing.T) {
+	st := openTestStore(t)
+	created, err := st.Create(entry.Entry{
+		Kind: "note",
+		Name: "alpha",
+		Body: "body text",
+		Tags: []string{"go"},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	session, ctx := connectTestClient(t, st)
+
+	cases := []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"list_entries", map[string]any{}, "alpha"},
+		{"get_entry", map[string]any{"id_or_name": created.ID}, "alpha"},
+		{"search_entries", map[string]any{"query": "alpha"}, "alpha"},
+		{"list_tools", map[string]any{}, "No executable tools"},
+		{"export_entries", map[string]any{}, "schema_version"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: tc.name, Arguments: tc.args})
+			if err != nil {
+				t.Fatalf("CallTool: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("tool error: %v", res.Content)
+			}
+			text := res.Content[0].(*sdkmcp.TextContent).Text
+			if !contains(text, tc.want) {
+				t.Fatalf("output missing %q: %s", tc.want, text)
+			}
+		})
+	}
+}
+
+func TestServer_AddEntryValidation(t *testing.T) {
+	st := openTestStore(t)
+	session, ctx := connectTestClient(t, st)
+
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "add_entry",
+		Arguments: map[string]any{"kind": "note"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected validation error for missing name")
+	}
+}
+
+func TestServer_AddAndUpdateEntryHappyPath(t *testing.T) {
+	st := openTestStore(t)
+	session, ctx := connectTestClient(t, st)
+
+	addRes, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "add_entry",
+		Arguments: map[string]any{
+			"kind": "note",
+			"name": "new-note",
+			"body": "hello",
+			"tags": "go,test",
+		},
+	})
+	if err != nil || addRes.IsError {
+		t.Fatalf("add_entry: %v %#v", err, addRes)
+	}
+	active, err := st.Create(entry.Entry{Kind: "note", Name: "existing", Body: "old"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	updRes, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name: "update_entry",
+		Arguments: map[string]any{
+			"id":   active.ID,
+			"body": "new body",
+		},
+	})
+	if err != nil || updRes.IsError {
+		t.Fatalf("update_entry: %v %#v", err, updRes)
+	}
+}
+
+func TestServer_InitializeKindsFilter(t *testing.T) {
+	st := openTestStore(t)
+	if _, err := st.Create(entry.Entry{Kind: "rule", Name: "r1", Body: "rule"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Create(entry.Entry{Kind: "note", Name: "n1", Body: "note"}); err != nil {
+		t.Fatal(err)
+	}
+	session, ctx := connectTestClient(t, st)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "initialize",
+		Arguments: map[string]any{"kinds": "rule"},
+	})
+	if err != nil || res.IsError {
+		t.Fatalf("initialize: %v", err)
+	}
+	text := res.Content[0].(*sdkmcp.TextContent).Text
+	if !contains(text, "r1") || contains(text, "n1") {
+		t.Fatalf("kinds filter failed: %s", text)
+	}
+}
+
+func TestServer_ListPluginsEmpty(t *testing.T) {
+	st := openTestStore(t)
+	session, ctx := connectTestClient(t, st)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "list_plugins"})
+	if err != nil || res.IsError {
+		t.Fatalf("list_plugins: %v", err)
+	}
+	text := res.Content[0].(*sdkmcp.TextContent).Text
+	if !contains(text, "No plugins installed") {
+		t.Fatalf("unexpected: %s", text)
+	}
+}
+
+func TestServer_GenerateContinueConfig(t *testing.T) {
+	st := openTestStore(t)
+	session, ctx := connectTestClient(t, st)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "generate_continue_config"})
+	if err != nil || res.IsError {
+		t.Fatalf("generate_continue_config: %v", err)
+	}
+	text := res.Content[0].(*sdkmcp.TextContent).Text
+	if !contains(text, "mcpServers") {
+		t.Fatalf("missing config: %s", text)
+	}
+}
+
+func TestServer_SearchEntriesErrorPath(t *testing.T) {
+	st := openTestStore(t)
+	session, ctx := connectTestClient(t, st)
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{Name: "search_entries"})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("expected error for missing query")
+	}
+}
+
+func TestServer_ToolListChangedAfterApproval(t *testing.T) {
+	st := openTestStore(t)
+	pending, err := st.CreatePending(entry.Entry{
+		Kind: "tool",
+		Name: "run-tests",
+		Body: "Run tests",
+		Fields: map[string]string{
+			"exec": "echo ok",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreatePending: %v", err)
+	}
+
+	changed := make(chan struct{}, 1)
+	session, ctx := connectTestClientWithOpts(t, st, &sdkmcp.ClientOptions{
+		ToolListChangedHandler: func(context.Context, *sdkmcp.ToolListChangedRequest) {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		},
+	})
+
+	before, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	beforeNames := toolNames(before.Tools)
+
+	if _, err := st.Approve(pending.ID); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	select {
+	case <-changed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for tools/list_changed notification")
+	}
+
+	after, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools after: %v", err)
+	}
+	afterNames := toolNames(after.Tools)
+	if containsAll(beforeNames, "run_tests") {
+		t.Fatalf("run_tests already present before approval: %v", beforeNames)
+	}
+	if !containsAll(afterNames, "run_tests") {
+		t.Fatalf("run_tests missing after approval: %v", afterNames)
+	}
+}
+
+func toolNames(tools []*sdkmcp.Tool) []string {
+	names := make([]string, len(tools))
+	for i, tool := range tools {
+		names[i] = tool.Name
+	}
+	return names
+}
+
+func containsAll(names []string, want string) bool {
+	for _, n := range names {
+		if n == want {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(s, sub string) bool {

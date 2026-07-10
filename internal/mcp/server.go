@@ -53,10 +53,7 @@ func NewServer(st *store.Store) *sdkmcp.Server {
 	registerStaticTools(server, st)
 	registerResources(server, st)
 	registerPrompts(server, st)
-	wireResourceNotifications(server, st)
-	if err := registerDynamicTools(server, st); err != nil {
-		fmt.Fprintf(os.Stderr, "naitv-mcp: dynamic tools: %v\n", err)
-	}
+	newDynamicToolRegistry(server, st).wire()
 	return server
 }
 
@@ -293,7 +290,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 			}
 		}
 		sb.WriteString("\nReview and approve entries in the naitv-mcp TUI (Review tab).")
-		sb.WriteString("\nRestart naitv-mcp serve after approving to activate executable tools.")
+		sb.WriteString("\nExecutable tools hot-reload after approval (no server restart needed).")
 		if len(result.Proposed) > 0 {
 			sb.WriteString("\nThen call set_project to point the tools at your project directory.")
 		}
@@ -370,7 +367,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 				fmt.Fprintf(&sb, "  ? %s\n", n)
 			}
 		}
-		sb.WriteString("\nRestart naitv-mcp serve for changes to take effect.")
+		sb.WriteString("\nDynamic tools hot-reload automatically after approval.")
 		return textResult(sb.String())
 	})
 
@@ -404,7 +401,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 			}
 		}
 		if len(result.Updated) > 0 {
-			sb.WriteString("\nRestart naitv-mcp serve for the changes to take effect.")
+			sb.WriteString("\nDynamic tools hot-reload automatically after approval.")
 		} else {
 			sb.WriteString("No changes needed — all tools already point at the correct directory.")
 		}
@@ -437,20 +434,6 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		}
 		return textResult(buf.String())
 	})
-}
-
-func registerDynamicTools(s *sdkmcp.Server, st *store.Store) error {
-	defs, err := tools.ListDefs(st)
-	if err != nil {
-		return err
-	}
-	for _, def := range defs {
-		registerOne(s, def)
-	}
-	if len(defs) > 0 {
-		fmt.Fprintf(os.Stderr, "naitv-mcp: registered %d dynamic tool(s)\n", len(defs))
-	}
-	return nil
 }
 
 func registerOne(s *sdkmcp.Server, def tools.Def) {
