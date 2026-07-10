@@ -1,6 +1,7 @@
 package entries
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/markdown"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
+	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -42,6 +44,13 @@ type Request struct {
 	ToggleDelivery bool
 	SwitchToReview bool
 	CopyBody       bool
+	Search         bool
+	Undo           bool
+	ShowHistory    bool
+	RestoreHistory bool
+	ToggleArchive  bool
+	RestoreEntry   bool
+	PurgeEntry     bool
 	SwitchKind     string
 	SwitchKindSet  bool // true even when SwitchKind == "" (all)
 }
@@ -58,6 +67,10 @@ type Model struct {
 	searchQuery       string
 	showConfirmDelete bool
 	deleteTargetID    string
+	showArchived      bool
+	showHistory       bool
+	historyRecords    []store.HistoryRecord
+	historySel        int
 
 	pane   listpane.Layout
 	detail listpane.Detail
@@ -148,7 +161,15 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	case EntriesLoadedMsg:
 		m.entries = msg.Entries
 		m.kinds = msg.Kinds
+		m.showArchived = msg.Archived
 		m.buildFlatItems()
+		m.updateViewport()
+		return m, nil, nil
+
+	case HistoryLoadedMsg:
+		m.historyRecords = msg.Records
+		m.historySel = 0
+		m.showHistory = true
 		m.updateViewport()
 		return m, nil, nil
 
@@ -201,6 +222,8 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			case msg.String() == "enter":
 				m.searchMode = false
 				m.searchInput.Blur()
+				m.searchQuery = m.searchInput.Value()
+				req = &Request{Search: true}
 			default:
 				m.searchInput, cmd = m.searchInput.Update(msg)
 			}
@@ -209,11 +232,19 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Down):
-			if m.sel.MoveDown(len(m.flatItems)) {
+			if m.showHistory && len(m.historyRecords) > 0 {
+				if m.historySel < len(m.historyRecords)-1 {
+					m.historySel++
+					m.updateViewport()
+				}
+			} else if m.sel.MoveDown(len(m.flatItems)) {
 				m.updateViewport()
 			}
 		case key.Matches(msg, m.keys.Up):
-			if m.sel.MoveUp() {
+			if m.showHistory && m.historySel > 0 {
+				m.historySel--
+				m.updateViewport()
+			} else if m.sel.MoveUp() {
 				m.updateViewport()
 			}
 		case key.Matches(msg, m.keys.Space):
@@ -264,6 +295,32 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		case key.Matches(msg, m.keys.ToggleMarkdown):
 			m.renderMarkdown = !m.renderMarkdown
 			m.updateViewport()
+		case key.Matches(msg, m.keys.Undo):
+			req = &Request{Undo: true}
+		case key.Matches(msg, m.keys.History):
+			if m.SelectedEntry() != nil {
+				req = &Request{ShowHistory: true}
+			}
+		case key.Matches(msg, m.keys.Archive):
+			req = &Request{ToggleArchive: true}
+		case key.Matches(msg, m.keys.Restore):
+			if m.showArchived && m.SelectedEntry() != nil {
+				req = &Request{RestoreEntry: true}
+			}
+		case key.Matches(msg, m.keys.Purge):
+			if m.showArchived && m.SelectedEntry() != nil {
+				req = &Request{PurgeEntry: true}
+			}
+		case msg.String() == "enter":
+			if m.showHistory && len(m.historyRecords) > 0 {
+				req = &Request{RestoreHistory: true}
+			}
+		case msg.String() == "esc":
+			if m.showHistory {
+				m.showHistory = false
+				m.historyRecords = nil
+				m.updateViewport()
+			}
 		}
 
 	case tea.MouseClickMsg:
@@ -387,6 +444,17 @@ func (m *Model) SearchQuery() string {
 	return m.searchInput.Value()
 }
 
+// ShowArchived reports whether the archive filter is active.
+func (m *Model) ShowArchived() bool { return m.showArchived }
+
+// SelectedHistoryID returns the selected history record ID, if any.
+func (m *Model) SelectedHistoryID() string {
+	if !m.showHistory || m.historySel < 0 || m.historySel >= len(m.historyRecords) {
+		return ""
+	}
+	return m.historyRecords[m.historySel].ID
+}
+
 // ── Grouping ──────────────────────────────────────────────────────────────────
 
 // groupFor returns the display group for an entry. Precedence:
@@ -478,6 +546,10 @@ func (m *Model) buildFlatItems() {
 
 // updateViewport refreshes the viewport content.
 func (m *Model) updateViewport() {
+	if m.showHistory {
+		m.detail.SetContent(m.formatHistoryDetail())
+		return
+	}
 	sel := m.SelectedEntry()
 	if sel == nil {
 		m.detail.SetContent("No entries.")
@@ -513,6 +585,27 @@ func (m *Model) formatEntryDetail(e entry.Entry) string {
 	}
 	sb.WriteString("\nCreated: " + e.CreatedAt.Format("2006-01-02 15:04:05") + "\n")
 	sb.WriteString("Updated: " + e.UpdatedAt.Format("2006-01-02 15:04:05") + "\n")
+	if e.AccessCount > 0 && e.LastAccessedAt != nil {
+		fmt.Fprintf(&sb, "Accessed: %d times, last %s\n", e.AccessCount, e.LastAccessedAt.Format("2006-01-02 15:04"))
+	} else {
+		sb.WriteString("Accessed: never — consider on-demand delivery?\n")
+	}
+	return sb.String()
+}
+
+func (m *Model) formatHistoryDetail() string {
+	if len(m.historyRecords) == 0 {
+		return "No history for this entry."
+	}
+	var sb strings.Builder
+	sb.WriteString("History (↑/↓, enter=restore, esc=close):\n\n")
+	for i, rec := range m.historyRecords {
+		marker := "  "
+		if i == m.historySel {
+			marker = "> "
+		}
+		fmt.Fprintf(&sb, "%s%s %s\n", marker, rec.CreatedAt.Format("2006-01-02 15:04:05"), rec.Action)
+	}
 	return sb.String()
 }
 

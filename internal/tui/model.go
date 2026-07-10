@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -10,6 +12,7 @@ import (
 	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	overlay "github.com/madicen/bubble-overlay"
 	"github.com/madicen/naitv-mcp/internal/store"
+	"github.com/madicen/naitv-mcp/internal/tui/editor"
 	"github.com/madicen/naitv-mcp/internal/tui/tab"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/entries"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/form"
@@ -36,6 +39,8 @@ type Model struct {
 	width, height int
 	statusMsg     string
 	statusExpiry  time.Time
+	undoHistoryID string
+	editProposalID string
 }
 
 // New creates a new root Model.
@@ -65,6 +70,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		entries.LoadEntriesCmd(m.store, ""),
 		m.loadPendingCount(),
+		m.loadStaleNudge(),
 	)
 }
 
@@ -112,19 +118,67 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case plugins.RequestMsg:
 		return m, m.handlePluginsRequest(&msg.Req)
 
-	case entries.EntriesLoadedMsg, entries.EntryDeletedMsg, entries.SearchResultsMsg:
+	case entries.EntriesLoadedMsg, entries.EntryDeletedMsg, entries.SearchResultsMsg, entries.HistoryLoadedMsg:
 		tab, cmd := m.updateTab(tabEntries, msg)
 		m.tabs[tabEntries] = tab
 		cmds = append(cmds, cmd)
-		if _, ok := msg.(entries.EntryDeletedMsg); ok {
-			cmds = append(cmds, entries.LoadEntriesCmd(m.store, m.entriesTab().SelectedKind()))
+		if deleted, ok := msg.(entries.EntryDeletedMsg); ok {
+			m.undoHistoryID = m.latestHistoryID(deleted.ID)
+			m.setStatus(fmt.Sprintf("Deleted %q — u to undo", deleted.Name))
+			kind := m.entriesTab().SelectedKind()
+			if m.entriesTab().ShowArchived() {
+				cmds = append(cmds, entries.LoadArchivedCmd(m.store, kind))
+			} else {
+				cmds = append(cmds, entries.LoadEntriesCmd(m.store, kind))
+			}
 		}
 		return m, tea.Batch(cmds...)
+
+	case editor.FinishedMsg:
+		if m.editProposalID != "" {
+			id := m.editProposalID
+			m.editProposalID = ""
+			if msg.Err != nil {
+				m.setStatus("Editor failed: " + msg.Err.Error())
+				return m, nil
+			}
+			e, err := m.store.Get(id)
+			if err == nil {
+				e.Body = msg.Body
+				_, _ = m.store.Update(e)
+				m.setStatus("Proposal body updated.")
+			}
+			return m, review.LoadProposalsCmd(m.store)
+		}
+		if m.form.Visible() {
+			newForm, cmd := m.form.Update(msg)
+			m.form = newForm
+			return m, cmd
+		}
+		return m, nil
 
 	case review.ProposalsLoadedMsg:
 		tab, cmd := m.updateTab(tabReview, msg)
 		m.tabs[tabReview] = tab
+		return m, tea.Batch(cmd, review.LoadTargetsCmd(m.store, msg.Proposals))
+
+	case review.TargetsLoadedMsg:
+		tab, cmd := m.updateTab(tabReview, msg)
+		m.tabs[tabReview] = tab
 		return m, cmd
+
+	case staleNudgeMsg:
+		if msg.text != "" {
+			m.setStatus(msg.text)
+		}
+		return m, nil
+
+	case undoHintMsg:
+		m.undoHistoryID = msg.historyID
+		if msg.status != "" {
+			m.setStatus(msg.status)
+		}
+		return m, nil
 
 	case review.ProposalApprovedMsg:
 		tab, cmd := m.updateTab(tabReview, msg)
@@ -235,6 +289,9 @@ func (m *Model) View() tea.View {
 	return v
 }
 
+// ZoneManager exposes the bubblezone manager for integration tests.
+func (m *Model) ZoneManager() *zone.Manager { return m.zoneManager }
+
 // SetDimensions updates dimensions for all child models. Tabs receive h-2: one
 // row for the tab bar and one for the blank separator line below it (see View).
 func (m *Model) SetDimensions(w, h int) {
@@ -283,6 +340,7 @@ func (m *Model) handleEntriesRequest(req *entries.Request) tea.Cmd {
 		m.form.SetMode(form.ModeCreate)
 		m.form.SetKinds(et.Kinds())
 		m.form.Show()
+		cmds = append(cmds, m.formWindowSizeCmd())
 	}
 	if req.OpenEditForm {
 		sel := et.SelectedEntry()
@@ -292,6 +350,7 @@ func (m *Model) handleEntriesRequest(req *entries.Request) tea.Cmd {
 			m.form.SetKinds(et.Kinds())
 			m.form.PopulateFrom(*sel)
 			m.form.Show()
+			cmds = append(cmds, m.formWindowSizeCmd())
 		}
 	}
 	if req.ConfirmDelete {
@@ -304,6 +363,7 @@ func (m *Model) handleEntriesRequest(req *entries.Request) tea.Cmd {
 		sel := et.SelectedEntry()
 		if sel != nil {
 			cmds = append(cmds, entries.ToggleDeliveryCmd(m.store, sel.ID, et.SelectedKind()))
+			cmds = append(cmds, m.captureUndoCmd(sel.ID, "Toggled delivery — u to undo"))
 		}
 	}
 	if req.CopyBody {
@@ -324,7 +384,56 @@ func (m *Model) handleEntriesRequest(req *entries.Request) tea.Cmd {
 	}
 	if req.SwitchKindSet {
 		m.entriesTab().SetSelectedKind(req.SwitchKind)
-		cmds = append(cmds, entries.LoadEntriesCmd(m.store, req.SwitchKind))
+		if et.ShowArchived() {
+			cmds = append(cmds, entries.LoadArchivedCmd(m.store, req.SwitchKind))
+		} else {
+			cmds = append(cmds, entries.LoadEntriesCmd(m.store, req.SwitchKind))
+		}
+	}
+	if req.Search {
+		cmds = append(cmds, entries.SearchCmd(m.store, et.SearchQuery()))
+	}
+	if req.Undo && m.undoHistoryID != "" {
+		cmds = append(cmds, entries.UndoCmd(m.store, m.undoHistoryID, et.SelectedKind(), et.ShowArchived()))
+		m.undoHistoryID = ""
+		m.setStatus("Undone.")
+	}
+	if req.ShowHistory {
+		sel := et.SelectedEntry()
+		if sel != nil {
+			cmds = append(cmds, entries.LoadHistoryCmd(m.store, sel.ID))
+		}
+	}
+	if req.RestoreHistory {
+		hid := et.SelectedHistoryID()
+		if hid != "" {
+			cmds = append(cmds, entries.RestoreVersionCmd(m.store, hid, et.SelectedKind(), et.ShowArchived()))
+			m.setStatus("Restored historical version.")
+		}
+	}
+	if req.ToggleArchive {
+		kind := et.SelectedKind()
+		if et.ShowArchived() {
+			cmds = append(cmds, entries.LoadEntriesCmd(m.store, kind))
+			m.setStatus("Showing active entries.")
+		} else {
+			cmds = append(cmds, entries.LoadArchivedCmd(m.store, kind))
+			m.setStatus("Showing archived entries (v=restore, P=purge).")
+		}
+	}
+	if req.RestoreEntry {
+		sel := et.SelectedEntry()
+		if sel != nil {
+			cmds = append(cmds, entries.RestoreEntryCmd(m.store, sel.ID, et.SelectedKind()))
+			m.setStatus("Entry restored.")
+		}
+	}
+	if req.PurgeEntry {
+		sel := et.SelectedEntry()
+		if sel != nil {
+			cmds = append(cmds, entries.PurgeEntryCmd(m.store, sel.ID, et.SelectedKind()))
+			m.setStatus("Entry purged.")
+		}
 	}
 
 	return tea.Batch(cmds...)
@@ -362,6 +471,14 @@ func (m *Model) handleReviewRequest(req *review.Request) tea.Cmd {
 			m.form.PopulateFrom(*sel)
 			m.form.SetProposalID(sel.ID)
 			m.form.Show()
+			cmds = append(cmds, m.formWindowSizeCmd())
+		}
+	}
+	if req.EditBody {
+		sel := rt.SelectedProposal()
+		if sel != nil {
+			m.editProposalID = sel.ID
+			cmds = append(cmds, editor.OpenBodyCmd(sel.Body))
 		}
 	}
 	if req.ApproveAll {
@@ -432,6 +549,47 @@ func (m *Model) loadPendingCount() tea.Cmd {
 		count, _ := m.store.PendingCount()
 		return pendingCountMsg{count: count}
 	}
+}
+
+func (m *Model) formWindowSizeCmd() tea.Cmd {
+	return func() tea.Msg {
+		return tea.WindowSizeMsg{Width: m.width, Height: m.height}
+	}
+}
+
+func (m *Model) loadStaleNudge() tea.Cmd {
+	return func() tea.Msg {
+		stale, err := m.store.StaleEntries(90, 3)
+		if err != nil || len(stale) == 0 {
+			return staleNudgeMsg{}
+		}
+		names := make([]string, 0, len(stale))
+		for _, e := range stale {
+			names = append(names, e.Name)
+		}
+		return staleNudgeMsg{text: "Stale entries (never accessed): " + strings.Join(names, ", ")}
+	}
+}
+
+func (m *Model) captureUndoCmd(entryID, status string) tea.Cmd {
+	return func() tea.Msg {
+		return undoHintMsg{historyID: m.latestHistoryID(entryID), status: status}
+	}
+}
+
+func (m *Model) latestHistoryID(entryID string) string {
+	records, err := m.store.History(entryID)
+	if err != nil || len(records) == 0 {
+		return ""
+	}
+	return records[0].ID
+}
+
+type staleNudgeMsg struct{ text string }
+
+type undoHintMsg struct {
+	historyID string
+	status    string
 }
 
 type pendingCountMsg struct{ count int }

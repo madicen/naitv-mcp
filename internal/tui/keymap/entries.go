@@ -5,7 +5,7 @@ import "charm.land/bubbles/v2/key"
 // Entries holds key bindings for the entries tab.
 type Entries struct {
 	Down, Up, Space, New, Edit, Delete, Delivery, Copy, Search, Review, Tab key.Binding
-	ToggleMarkdown key.Binding
+	ToggleMarkdown, Undo, History, Archive, Restore, Purge key.Binding
 	ConfirmYes, ConfirmNo, SearchEsc key.Binding
 }
 
@@ -70,6 +70,26 @@ var DefaultEntries = Entries{
 	ToggleMarkdown: key.NewBinding(
 		key.WithKeys("m"),
 		key.WithHelp("m", "markdown"),
+	),
+	Undo: key.NewBinding(
+		key.WithKeys("u"),
+		key.WithHelp("u", "undo"),
+	),
+	History: key.NewBinding(
+		key.WithKeys("H"),
+		key.WithHelp("H", "history"),
+	),
+	Archive: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "archive"),
+	),
+	Restore: key.NewBinding(
+		key.WithKeys("v"),
+		key.WithHelp("v", "restore"),
+	),
+	Purge: key.NewBinding(
+		key.WithKeys("P"),
+		key.WithHelp("P", "purge"),
 	),
 }
 

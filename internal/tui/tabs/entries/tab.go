@@ -75,3 +75,12 @@ func (t *Tab) SelectedEntry() *entry.Entry { return t.model.SelectedEntry() }
 
 // DeleteTargetID returns the ID of the entry pending deletion.
 func (t *Tab) DeleteTargetID() string { return t.model.DeleteTargetID() }
+
+// SearchQuery returns the current search query.
+func (t *Tab) SearchQuery() string { return t.model.SearchQuery() }
+
+// ShowArchived reports whether the archive filter is active.
+func (t *Tab) ShowArchived() bool { return t.model.ShowArchived() }
+
+// SelectedHistoryID returns the selected history record ID.
+func (t *Tab) SelectedHistoryID() string { return t.model.SelectedHistoryID() }
