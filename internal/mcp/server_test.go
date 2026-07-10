@@ -3,6 +3,7 @@ package mcp_test
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/madicen/naitv-mcp/internal/mcp"
@@ -103,6 +104,37 @@ func TestServer_ReadResources(t *testing.T) {
 	_, err = session.ReadResource(ctx, &sdkmcp.ReadResourceParams{URI: "naitv://entry/nonexistent"})
 	if err == nil {
 		t.Fatal("expected error for missing entry resource")
+	}
+}
+
+func TestServer_GetPrompts(t *testing.T) {
+	st := openTestStore(t)
+	session, ctx := connectTestClient(t, st)
+
+	var names []string
+	for p, err := range session.Prompts(ctx, nil) {
+		if err != nil {
+			t.Fatalf("Prompts: %v", err)
+		}
+		names = append(names, p.Name)
+	}
+	if !contains(stringsJoin(names, ","), "load-context") || !contains(stringsJoin(names, ","), "propose-learning") {
+		t.Fatalf("expected load-context and propose-learning prompts, got %v", names)
+	}
+
+	res, err := session.GetPrompt(ctx, &sdkmcp.GetPromptParams{
+		Name:      "load-context",
+		Arguments: map[string]string{"task": "fix flaky tests"},
+	})
+	if err != nil {
+		t.Fatalf("GetPrompt: %v", err)
+	}
+	if len(res.Messages) == 0 {
+		t.Fatal("expected prompt messages")
+	}
+	text, ok := res.Messages[0].Content.(*sdkmcp.TextContent)
+	if !ok || !contains(text.Text, "fix flaky tests") {
+		t.Fatalf("prompt missing task: %#v", res.Messages[0].Content)
 	}
 }
 

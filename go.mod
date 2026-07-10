@@ -6,8 +6,11 @@ require (
 	charm.land/bubbles/v2 v2.1.1
 	charm.land/bubbletea/v2 v2.0.8
 	charm.land/fang/v2 v2.0.1
+	charm.land/glamour/v2 v2.0.1
+	charm.land/huh/v2 v2.0.3
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/charmbracelet/colorprofile v0.4.3
+	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/lrstanley/bubblezone/v2 v2.0.0
 	github.com/madicen/bubble-dropdown v0.0.5
 	github.com/madicen/bubble-overlay v0.0.0-20260528215458-97d5221a8fee
@@ -20,8 +23,6 @@ require (
 replace github.com/madicen/bubble-dropdown => ../bubble-dropdown
 
 require (
-	charm.land/glamour/v2 v2.0.1 // indirect
-	charm.land/huh/v2 v2.0.3 // indirect
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
@@ -30,7 +31,6 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10 // indirect
 	github.com/charmbracelet/lipgloss v1.1.0 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260703014108-f5a850f9c2b7 // indirect
-	github.com/charmbracelet/x/ansi v0.11.7 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/exp/charmtone v0.0.0-20250603201427-c31516f43444 // indirect
 	github.com/charmbracelet/x/exp/ordered v0.1.0 // indirect
