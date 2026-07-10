@@ -219,7 +219,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 				m.searchInput.Blur()
 				m.searchInput.SetValue("")
 				m.searchQuery = ""
-			case msg.String() == "enter":
+			case key.Matches(msg, m.keys.SearchSubmit):
 				m.searchMode = false
 				m.searchInput.Blur()
 				m.searchQuery = m.searchInput.Value()
@@ -311,11 +311,11 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			if m.showArchived && m.SelectedEntry() != nil {
 				req = &Request{PurgeEntry: true}
 			}
-		case msg.String() == "enter":
+		case key.Matches(msg, m.keys.ConfirmYes):
 			if m.showHistory && len(m.historyRecords) > 0 {
 				req = &Request{RestoreHistory: true}
 			}
-		case msg.String() == "esc":
+		case key.Matches(msg, m.keys.SearchEsc):
 			if m.showHistory {
 				m.showHistory = false
 				m.historyRecords = nil
