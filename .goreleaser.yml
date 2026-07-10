@@ -6,6 +6,8 @@ project_name: naitv-mcp
 before:
   hooks:
     - go mod tidy
+    - bash scripts/completions.sh
+    - bash scripts/manpages.sh
 
 builds:
   - id: naitv-mcp
@@ -22,6 +24,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
+      - -X github.com/madicen/naitv-mcp/internal/mcp.Version={{.Version}}
 
 archives:
   - id: default
@@ -39,6 +42,8 @@ archives:
     files:
       - README.md
       - LICENSE*
+      - completions/*
+      - manpages/*
 
 checksum:
   name_template: 'checksums.txt'
@@ -75,6 +80,11 @@ homebrew_casks:
           if OS.mac?
             system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/naitv-mcp"]
           end
+    generate_completions_from_executable:
+      executable: "naitv-mcp"
+      args: ["completion"]
+      shell_parameter_format: cobra
+      shells: [bash, zsh, fish]
 
 release:
   github:

@@ -1,27 +1,16 @@
 package plugins
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/madicen/naitv-mcp/internal/plugin"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
-)
-
-var (
-	styleSelected   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	styleUnselected = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	styleMode       = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 1)
-	styleModeInact  = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Padding(0, 1)
-	styleDiv        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	styleDetail     = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
-	styleList       = lipgloss.NewStyle().Padding(0, 1)
-	styleStatus     = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
-	styleDim        = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	styleBadge      = lipgloss.NewStyle().Foreground(lipgloss.Color("34")).Bold(true) // green "installed"
-	styleKey        = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true)
-	styleHint       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
 )
 
 // renderList renders the left-pane list (installed or available).
@@ -30,37 +19,37 @@ func (m *Model) renderList() string {
 	h := m.contentH()
 
 	// Mode bar
-	instLabel := styleModeInact.Render("Installed")
-	browLabel := styleModeInact.Render("Browse")
+	instLabel := theme.PluginModeInact.Render("Installed")
+	browLabel := theme.PluginModeInact.Render("Browse")
 	if m.mode == modeInstalled {
-		instLabel = styleMode.Render("Installed")
+		instLabel = theme.PluginMode.Render("Installed")
 	} else {
-		browLabel = styleMode.Render("Browse")
+		browLabel = theme.PluginMode.Render("Browse")
 	}
-	modeLine := instLabel + styleDim.Render(" | ") + browLabel
+	modeLine := instLabel + theme.DimStyle.Render(" | ") + browLabel
 
 	var rows []string
 	rows = append(rows, modeLine)
-	rows = append(rows, styleDim.Render(strings.Repeat("─", w-2)))
+	rows = append(rows, theme.DimStyle.Render(strings.Repeat("─", w-2)))
 
 	switch m.mode {
 	case modeInstalled:
 		if len(m.installed) == 0 {
-			rows = append(rows, styleDim.Render(" No plugins installed."))
-			rows = append(rows, styleDim.Render(" Press i to install one."))
+			rows = append(rows, theme.DimStyle.Render(" No plugins installed."))
+			rows = append(rows, theme.DimStyle.Render(" Press i to install one."))
 		} else {
 			for i, e := range m.installed {
-				rows = append(rows, renderInstalledRow(e, i == m.cursor, w))
+				rows = append(rows, renderInstalledRow(e, i == m.sel.Index, w))
 			}
 		}
 	case modeBrowse:
 		if m.loading {
-			rows = append(rows, styleDim.Render(" Fetching registry…"))
+			rows = append(rows, m.spin.View()+theme.DimStyle.Render(" Fetching registry…"))
 		} else if len(m.available) == 0 {
-			rows = append(rows, styleDim.Render(" Press r to fetch registry."))
+			rows = append(rows, theme.DimStyle.Render(" Press r to fetch registry."))
 		} else {
 			for i, re := range m.available {
-				rows = append(rows, renderAvailableRow(re, i == m.cursor, w, m.installedNames[re.Name]))
+				rows = append(rows, renderAvailableRow(re, i == m.sel.Index, w, m.installedNames[re.Name]))
 			}
 		}
 	}
@@ -70,57 +59,54 @@ func (m *Model) renderList() string {
 		rows = append(rows, "")
 	}
 	content := strings.Join(rows[:h], "\n")
-	return styleList.Width(w).Render(content)
+	return theme.PluginList.Width(w).Render(content)
 }
 
 // renderInstalledRow renders one row in the installed list.
 func renderInstalledRow(e entry.Entry, selected bool, w int) string {
 	ver := e.Fields["version"]
 	cnt := e.Fields["entry_count"]
-	line := fmt.Sprintf("%-22s v%-8s %s entries", truncate(e.Name, 22), ver, cnt)
+	line := fmt.Sprintf("%-22s v%-8s %s entries", layout.Truncate(e.Name, 22), ver, cnt)
 	if selected {
-		return styleSelected.Render("▶ " + line)
+		return theme.Selected.Render("▶ " + line)
 	}
-	return styleUnselected.Render("  " + line)
+	return theme.TextStyle.Render("  " + line)
 }
 
 // renderAvailableRow renders one row in the Browse (registry) list.
 func renderAvailableRow(re plugin.RegistryEntry, selected bool, w int, installed bool) string {
 	badge := ""
 	if installed {
-		badge = styleBadge.Render(" ✓")
+		badge = theme.PluginInstalled.Render(" ✓")
 	}
-	line := truncate(re.Name, 24) + badge
+	line := layout.Truncate(re.Name, 24) + badge
 	if selected {
-		return styleSelected.Render("▶ " + line)
+		return theme.Selected.Render("▶ " + line)
 	}
-	return styleUnselected.Render("  " + line)
+	return theme.TextStyle.Render("  " + line)
 }
 
 // renderDetail renders the right-pane detail box.
 func (m *Model) renderDetail() string {
-	w := m.detailW()
-	h := m.contentH()
-	inner := styleDetail.Width(w - 2).Height(h - 2).Render(m.viewport.View())
-	return inner
+	return m.detail.RenderBorderless(m.detailW(), m.contentH())
 }
 
 // detailContent generates the text displayed in the detail viewport.
 func (m *Model) detailContent() string {
 	if m.loading {
-		return styleDim.Render("Working…")
+		return m.spin.View() + theme.DimStyle.Render(" Working…")
 	}
 	switch m.mode {
 	case modeInstalled:
 		sel := m.selectedInstalled()
 		if sel == nil {
-			return styleDim.Render("No plugins installed.\nPress i to install a plugin by name, URL, or file path.")
+			return theme.DimStyle.Render("No plugins installed.\nPress i to install a plugin by name, URL, or file path.")
 		}
 		return formatInstalledDetail(*sel)
 	case modeBrowse:
 		sel := m.selectedAvailable()
 		if sel == nil {
-			return styleDim.Render("No plugins in registry.")
+			return theme.DimStyle.Render("No plugins in registry.")
 		}
 		return m.formatAvailableDetail(*sel)
 	}
@@ -146,20 +132,19 @@ func formatInstalledDetail(e entry.Entry) string {
 		}
 	}
 
-	// List the entry names stored in entry_names field.
-	if names := e.Fields["entry_names"]; names != "" {
-		sb.WriteString("\nProposed entries:\n")
-		for _, n := range strings.Split(names, ",") {
-			n = strings.TrimSpace(n)
-			if n == "" {
-				continue
+	// List linked entry IDs from the tracker.
+	if raw := e.Fields["entry_ids"]; raw != "" {
+		var ids []string
+		if err := json.Unmarshal([]byte(raw), &ids); err == nil && len(ids) > 0 {
+			sb.WriteString("\nLinked entries:\n")
+			for _, id := range ids {
+				fmt.Fprintf(&sb, "  %s\n", id)
 			}
-			fmt.Fprintf(&sb, "  %s\n", n)
 		}
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(styleDim.Render("Press u to uninstall this plugin."))
+	sb.WriteString(theme.DimStyle.Render("Press u to uninstall this plugin."))
 	return sb.String()
 }
 
@@ -187,9 +172,9 @@ func (m *Model) formatAvailableDetail(re plugin.RegistryEntry) string {
 
 	sb.WriteString("\n")
 	if m.installedNames[re.Name] {
-		sb.WriteString(styleBadge.Render("✓ Already installed"))
+		sb.WriteString(theme.PluginInstalled.Render("✓ Already installed"))
 	} else {
-		sb.WriteString(styleKey.Render("Press i to install this plugin."))
+		sb.WriteString(theme.KeyHint.Render("Press i to install this plugin."))
 	}
 	return sb.String()
 }
@@ -197,35 +182,27 @@ func (m *Model) formatAvailableDetail(re plugin.RegistryEntry) string {
 // renderBottom renders the action/hint bar and (when active) the input field.
 func (m *Model) renderBottom() string {
 	if m.inputActive {
-		prompt := styleKey.Render("Install: ") + m.input.View()
-		hint := styleDim.Render("  Enter to confirm · Esc to cancel")
+		prompt := theme.KeyHint.Render("Install: ") + m.input.View()
+		hint := theme.Hint.Render("  Enter to confirm · Esc to cancel")
 		return prompt + hint
 	}
 
-	var hints []string
-	hints = append(hints, styleKey.Render("[i]")+styleHint.Render(" install"))
+	var hints []keymap.ActionZone
+	hints = append(hints, keymap.ActionZone{ZoneID: zones.PluginActInstall, Binding: m.keys.Install})
 	if m.mode == modeInstalled {
-		hints = append(hints, styleKey.Render("[u]")+styleHint.Render(" uninstall"))
+		hints = append(hints, keymap.ActionZone{ZoneID: zones.PluginActUninstall, Binding: m.keys.Uninstall})
 	}
-	hints = append(hints, styleKey.Render("[tab]")+styleHint.Render(" switch view"))
-	hints = append(hints, styleKey.Render("[r]")+styleHint.Render(" refresh registry"))
-
-	hintLine := strings.Join(hints, styleHint.Render("  "))
+	hints = append(hints,
+		keymap.ActionZone{ZoneID: zones.PluginActTab, Binding: m.keys.Tab},
+		keymap.ActionZone{ZoneID: zones.PluginActRefresh, Binding: m.keys.Refresh},
+	)
+	hintLine := keymap.RenderActionBar(m.zoneManager, hints)
 
 	statusLine := ""
 	if m.status != "" {
-		statusLine = "\n" + styleStatus.Render(m.status)
+		statusLine = "\n" + theme.StatusStyle.Render(m.status)
 	}
 	return hintLine + statusLine
-}
-
-// truncate shortens s to max runes, appending … if needed.
-func truncate(s string, max int) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	return string(runes[:max-1]) + "…"
 }
 
 // wordWrap breaks s into lines no longer than width runes.

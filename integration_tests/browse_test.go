@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/entries"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -30,14 +30,14 @@ func TestJourney_BrowseEntries(t *testing.T) {
 	loaded := entries.LoadEntriesCmd(st, "")()
 	m = updateModel(m, loaded)
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "my-repo") && !strings.Contains(view, "my-note") {
 		t.Errorf("expected entries in view, got:\n%s", view)
 	}
 
 	// Navigate down.
 	m = updateModel(m, keyType(tea.KeyDown))
-	_ = m.View() // should not panic
+	_ = m.View().Content // should not panic
 }
 
 // TestJourney_KindTabsAutoPopulate creates entries of distinct kinds and verifies
@@ -58,7 +58,7 @@ func TestJourney_KindTabsAutoPopulate(t *testing.T) {
 	loaded := entries.LoadEntriesCmd(st, "")()
 	m = updateModel(m, loaded)
 
-	view := m.View()
+	view := m.View().Content
 	for _, k := range kinds {
 		if !strings.Contains(view, k) {
 			t.Errorf("expected kind %q in view, got:\n%s", k, view)

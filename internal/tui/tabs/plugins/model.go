@@ -4,11 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
+	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -52,9 +58,11 @@ type Model struct {
 
 	// UI state
 	mode          viewMode
-	cursor        int
 	width, height int
-	viewport      viewport.Model
+
+	pane   listpane.Layout
+	detail listpane.Detail
+	sel    listpane.Selection
 
 	// Text input for "install from custom source"
 	inputActive bool
@@ -63,6 +71,8 @@ type Model struct {
 	// Status / loading
 	status  string // flash message (success or error)
 	loading bool   // true while an async op is in flight
+	spin    spinner.Model
+	keys    keymap.Plugins
 }
 
 // NewModel creates a new Plugins tab model.
@@ -70,17 +80,29 @@ func NewModel(zm *zone.Manager) Model {
 	inp := textinput.New()
 	inp.Placeholder = "plugin name, URL, or ./path/to/plugin.json"
 	inp.CharLimit = 512
-	inp.Width = 52
+	inp.SetWidth(52)
+
+	spin := spinner.New()
+	spin.Spinner = spinner.Dot
+	spin.Style = theme.DimStyle
 
 	return Model{
 		zoneManager:    zm,
 		installedNames: make(map[string]bool),
 		input:          inp,
+		detail:         listpane.NewDetail(),
+		spin:           spin,
+		keys:           keymap.DefaultPlugins,
 	}
 }
 
 // Init returns the initial command (none — LoadPluginsCmd is called by root on tab switch).
 func (m Model) Init() tea.Cmd { return nil }
+
+func (m *Model) startLoading() tea.Cmd {
+	m.loading = true
+	return m.spin.Tick
+}
 
 // InputActive returns true when the text input for custom install is open.
 // The root model uses this to suppress the global 'q' quit binding.
@@ -89,8 +111,16 @@ func (m Model) InputActive() bool { return m.inputActive }
 // Update handles messages and returns (updated model, optional request, optional cmd).
 func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	var req *Request
+	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+
+	case spinner.TickMsg:
+		if m.loading {
+			m.spin, cmd = m.spin.Update(msg)
+			return m, nil, cmd
+		}
+		return m, nil, nil
 
 	// ── Async results ────────────────────────────────────────────────────────
 
@@ -116,7 +146,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		} else {
 			m.available = msg.Registry.Plugins
 			m.mode = modeBrowse
-			m.cursor = 0
+			m.sel.Index = 0
 			m.status = fmt.Sprintf("Registry loaded — %d plugin(s) available", len(m.available))
 		}
 		m.updateViewport()
@@ -149,15 +179,15 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 
 	// ── Input mode (custom install source) ──────────────────────────────────
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.inputActive {
-			switch msg.String() {
-			case "esc":
+			switch {
+			case key.Matches(msg, m.keys.InputEsc):
 				m.inputActive = false
 				m.input.Blur()
 				m.input.SetValue("")
 				m.status = ""
-			case "enter":
+			case key.Matches(msg, m.keys.InputEnter):
 				source := strings.TrimSpace(m.input.Value())
 				if source == "" {
 					m.status = "Enter a plugin name, URL, or file path."
@@ -165,81 +195,74 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 				}
 				m.inputActive = false
 				m.input.Blur()
-				m.loading = true
 				m.status = "Installing " + source + "…"
 				req = &Request{Install: true, Source: source}
+				return m, req, m.startLoading()
 			default:
-				var cmd tea.Cmd
 				m.input, cmd = m.input.Update(msg)
 				return m, nil, cmd
 			}
 			return m, req, nil
 		}
 
-		switch msg.String() {
-		case "j", "down":
-			if m.cursor < m.listLen()-1 {
-				m.cursor++
+		switch {
+		case key.Matches(msg, m.keys.Down):
+			if m.sel.MoveDown(m.listLen()) {
 				m.updateViewport()
 			}
-		case "k", "up":
-			if m.cursor > 0 {
-				m.cursor--
+		case key.Matches(msg, m.keys.Up):
+			if m.sel.MoveUp() {
 				m.updateViewport()
 			}
-		case "tab":
+		case key.Matches(msg, m.keys.Tab):
 			// Switch between Installed / Browse; trigger registry fetch if switching to Browse.
 			if m.mode == modeInstalled {
 				if len(m.available) == 0 {
-					m.loading = true
 					m.status = "Fetching registry…"
 					req = &Request{FetchRegistry: true}
-				} else {
-					m.mode = modeBrowse
-					m.cursor = 0
-					m.updateViewport()
+					return m, req, m.startLoading()
 				}
+				m.mode = modeBrowse
+				m.sel.Index = 0
+				m.updateViewport()
 			} else {
 				m.mode = modeInstalled
-				m.cursor = 0
+				m.sel.Index = 0
 				m.updateViewport()
 			}
-		case "r":
-			// Refresh registry (always re-fetches)
-			m.loading = true
+		case key.Matches(msg, m.keys.Refresh):
 			m.status = "Fetching registry…"
 			req = &Request{FetchRegistry: true}
-		case "i":
+			return m, req, m.startLoading()
+		case key.Matches(msg, m.keys.Install):
 			switch m.mode {
 			case modeInstalled:
-				// Open text input for custom source.
 				m.inputActive = true
 				m.input.Focus()
 				m.status = ""
 			case modeBrowse:
-				// Install currently highlighted registry plugin.
 				if sel := m.selectedAvailable(); sel != nil {
 					if m.installedNames[sel.Name] {
 						m.status = fmt.Sprintf("Plugin %q is already installed.", sel.Name)
 					} else {
-						m.loading = true
 						m.status = "Installing " + sel.Name + "…"
 						req = &Request{Install: true, Source: sel.Name}
+						return m, req, m.startLoading()
 					}
 				}
 			}
-		case "u":
+		case key.Matches(msg, m.keys.Uninstall):
 			if m.mode == modeInstalled {
 				if sel := m.selectedInstalled(); sel != nil {
-					m.loading = true
 					m.status = "Uninstalling " + sel.Name + "…"
 					req = &Request{Uninstall: true, Name: sel.Name}
+					return m, req, m.startLoading()
 				}
 			}
 		}
 	}
 
-	return m, req, nil
+	return m, req, cmd
 }
 
 // View renders the plugins tab.
@@ -251,8 +274,8 @@ func (m Model) View() string {
 	right := m.renderDetail()
 	bottom := m.renderBottom()
 
-	divider := styleDiv.Render(strings.Repeat("│\n", m.contentH()))
-	body := joinHorizontal(left, divider, right)
+	divider := theme.PluginDivider.Render(strings.Repeat("│\n", m.contentH()))
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
 	return body + "\n" + bottom
 }
 
@@ -260,15 +283,8 @@ func (m Model) View() string {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	vpW := m.detailW() - 2 // inside rounded border
-	if vpW < 1 {
-		vpW = 1
-	}
-	vpH := m.contentH() - 2
-	if vpH < 1 {
-		vpH = 1
-	}
-	m.viewport = viewport.New(vpW, vpH)
+	m.pane = listpane.Compute(w, h, layout.PluginsFooterRows+2, 0)
+	m.detail.Resize(m.pane)
 	m.updateViewport()
 }
 
@@ -282,74 +298,38 @@ func (m *Model) listLen() int {
 }
 
 func (m *Model) clampCursor() {
-	if l := m.listLen(); l == 0 {
-		m.cursor = 0
-	} else if m.cursor >= l {
-		m.cursor = l - 1
-	}
+	m.sel.Clamp(m.listLen())
 }
 
 func (m *Model) selectedInstalled() *entry.Entry {
-	if len(m.installed) == 0 || m.cursor >= len(m.installed) {
+	if len(m.installed) == 0 || m.sel.Index >= len(m.installed) {
 		return nil
 	}
-	e := m.installed[m.cursor]
+	e := m.installed[m.sel.Index]
 	return &e
 }
 
 func (m *Model) selectedAvailable() *plugin.RegistryEntry {
-	if len(m.available) == 0 || m.cursor >= len(m.available) {
+	if len(m.available) == 0 || m.sel.Index >= len(m.available) {
 		return nil
 	}
-	e := m.available[m.cursor]
+	e := m.available[m.sel.Index]
 	return &e
 }
 
 func (m *Model) updateViewport() {
-	m.viewport.SetContent(m.detailContent())
+	m.detail.SetContent(m.detailContent())
 }
 
-func (m *Model) listW() int  { return m.width * 35 / 100 }
-func (m *Model) detailW() int { return m.width - m.listW() - 1 }
+func (m *Model) listW() int   { return m.pane.ListW }
+func (m *Model) detailW() int { return m.pane.DetailW }
 func (m *Model) contentH() int {
-	h := m.height - 4 // tab bar (1) + mode bar (1) + bottom bar (2)
-	if h < 1 {
-		return 1
+	if m.height != 0 {
+		return m.pane.ContentH
 	}
-	return h
+	return layout.ContentHeight(m.height, layout.PluginsFooterRows+2)
 }
 
 // ReloadInstalledMsg is emitted by the plugins tab to ask the root model to
 // call LoadPluginsCmd(st). It is exported so the root can type-switch on it.
 type ReloadInstalledMsg struct{}
-
-// joinHorizontal joins strings side by side, line by line.
-func joinHorizontal(parts ...string) string {
-	splitAll := make([][]string, len(parts))
-	maxLines := 0
-	for i, p := range parts {
-		lines := strings.Split(p, "\n")
-		splitAll[i] = lines
-		if len(lines) > maxLines {
-			maxLines = len(lines)
-		}
-	}
-	rows := make([]string, maxLines)
-	for r := 0; r < maxLines; r++ {
-		var sb strings.Builder
-		for i, lines := range splitAll {
-			if r < len(lines) {
-				sb.WriteString(lines[r])
-			} else if i < len(splitAll)-1 {
-				// Pad missing lines to keep columns aligned.
-				var wid int
-				if len(lines) > 0 {
-					wid = len([]rune(lines[0]))
-				}
-				sb.WriteString(strings.Repeat(" ", wid))
-			}
-		}
-		rows[r] = sb.String()
-	}
-	return strings.Join(rows, "\n")
-}

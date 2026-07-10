@@ -5,11 +5,17 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/markdown"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
+	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -38,6 +44,13 @@ type Request struct {
 	ToggleDelivery bool
 	SwitchToReview bool
 	CopyBody       bool
+	Search         bool
+	Undo           bool
+	ShowHistory    bool
+	RestoreHistory bool
+	ToggleArchive  bool
+	RestoreEntry   bool
+	PurgeEntry     bool
 	SwitchKind     string
 	SwitchKindSet  bool // true even when SwitchKind == "" (all)
 }
@@ -48,21 +61,30 @@ type Model struct {
 	entries           []entry.Entry
 	kinds             []string
 	selectedKind      string
-	selectedIdx       int
 	width, height     int
 	searchMode        bool
 	searchInput       textinput.Model
 	searchQuery       string
-	viewport          viewport.Model
 	showConfirmDelete bool
 	deleteTargetID    string
+	showArchived      bool
+	showHistory       bool
+	historyRecords    []store.HistoryRecord
+	historySel        int
+
+	pane   listpane.Layout
+	detail listpane.Detail
+	sel    listpane.Selection
 
 	// Group-collapse state.
 	collapsed map[string]bool // group name → collapsed
 	flatItems []listItem      // rebuilt by buildFlatItems after every data change
 
 	// kindDD is the kind-filter dropdown (replaces the old pill row).
-	kindDD *bubbledropdown.Dropdown
+	kindDD *dropdownv2.Dropdown
+	keys   keymap.Entries
+	md     *markdown.Renderer
+	renderMarkdown bool
 	// contentTop is the absolute terminal row where the entries content begins
 	// (the tab-bar height). Mouse events are translated by this offset before
 	// reaching an open dropdown's geometric hit-test, since the dropdown panel
@@ -76,13 +98,13 @@ func NewModel(zm *zone.Manager) Model {
 	si.Placeholder = "Search..."
 	si.CharLimit = 200
 
-	vp := viewport.New(0, 0)
-
 	return Model{
 		zoneManager: zm,
 		searchInput: si,
-		viewport:    vp,
+		detail:      listpane.NewDetail(),
 		collapsed:   make(map[string]bool),
+		keys:        keymap.DefaultEntries,
+		md:          markdown.NewRenderer(80),
 	}
 }
 
@@ -99,13 +121,13 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	// Dropdown result messages first: apply the choice, close the panel, and
 	// (on a real selection) emit the kind-switch request.
 	switch dm := msg.(type) {
-	case bubbledropdown.ItemChosenMsg:
+	case dropdownv2.ItemChosenMsg:
 		if m.kindDD != nil {
 			m.kindDD, _ = m.kindDD.Update(msg)
 		}
 		req = &Request{SwitchKind: m.kindAtIndex(dm.Index), SwitchKindSet: true}
 		return m, req, nil
-	case bubbledropdown.ItemCanceledMsg:
+	case dropdownv2.ItemCanceledMsg:
 		if m.kindDD != nil {
 			m.kindDD, _ = m.kindDD.Update(msg)
 		}
@@ -117,10 +139,18 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	// translated into content-local space first.
 	if m.kindDD != nil && m.kindDD.Open() {
 		switch mm := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			m.kindDD, cmd = m.kindDD.Update(mm)
 			return m, nil, cmd
-		case tea.MouseMsg:
+		case tea.MouseClickMsg:
+			mm.Y -= m.contentTop
+			m.kindDD, cmd = m.kindDD.Update(mm)
+			return m, nil, cmd
+		case tea.MouseMotionMsg:
+			mm.Y -= m.contentTop
+			m.kindDD, cmd = m.kindDD.Update(mm)
+			return m, nil, cmd
+		case tea.MouseWheelMsg:
 			mm.Y -= m.contentTop
 			m.kindDD, cmd = m.kindDD.Update(mm)
 			return m, nil, cmd
@@ -131,7 +161,15 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	case EntriesLoadedMsg:
 		m.entries = msg.Entries
 		m.kinds = msg.Kinds
+		m.showArchived = msg.Archived
 		m.buildFlatItems()
+		m.updateViewport()
+		return m, nil, nil
+
+	case HistoryLoadedMsg:
+		m.historyRecords = msg.Records
+		m.historySel = 0
+		m.showHistory = true
 		m.updateViewport()
 		return m, nil, nil
 
@@ -152,7 +190,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	case SearchResultsMsg:
 		m.entries = msg.Entries
 		m.searchQuery = msg.Query
-		m.selectedIdx = 0
+		m.sel.Index = 0
 		m.buildFlatItems()
 		m.updateViewport()
 		return m, nil, nil
@@ -161,13 +199,13 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		m.SetDimensions(msg.Width, msg.Height)
 		return m, nil, nil
 
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		if m.showConfirmDelete {
-			switch msg.String() {
-			case "y", "enter":
+			switch {
+			case key.Matches(msg, m.keys.ConfirmYes):
 				req = &Request{ConfirmDelete: true}
 				return m, req, nil
-			case "n", "esc":
+			case key.Matches(msg, m.keys.ConfirmNo):
 				m.showConfirmDelete = false
 				m.deleteTargetID = ""
 			}
@@ -175,130 +213,158 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		}
 
 		if m.searchMode {
-			switch msg.String() {
-			case "esc":
+			switch {
+			case key.Matches(msg, m.keys.SearchEsc):
 				m.searchMode = false
 				m.searchInput.Blur()
 				m.searchInput.SetValue("")
 				m.searchQuery = ""
-			case "enter":
+			case key.Matches(msg, m.keys.SearchSubmit):
 				m.searchMode = false
 				m.searchInput.Blur()
+				m.searchQuery = m.searchInput.Value()
+				req = &Request{Search: true}
 			default:
 				m.searchInput, cmd = m.searchInput.Update(msg)
 			}
-			return m, nil, cmd
+			return m, req, cmd
 		}
 
-		switch msg.String() {
-		case "j", "down":
-			if m.selectedIdx < len(m.flatItems)-1 {
-				m.selectedIdx++
+		switch {
+		case key.Matches(msg, m.keys.Down):
+			if m.showHistory && len(m.historyRecords) > 0 {
+				if m.historySel < len(m.historyRecords)-1 {
+					m.historySel++
+					m.updateViewport()
+				}
+			} else if m.sel.MoveDown(len(m.flatItems)) {
 				m.updateViewport()
 			}
-		case "k", "up":
-			if m.selectedIdx > 0 {
-				m.selectedIdx--
+		case key.Matches(msg, m.keys.Up):
+			if m.showHistory && m.historySel > 0 {
+				m.historySel--
+				m.updateViewport()
+			} else if m.sel.MoveUp() {
 				m.updateViewport()
 			}
-		case " ":
+		case key.Matches(msg, m.keys.Space):
 			// Space on a group header toggles its collapse state.
-			if m.selectedIdx < len(m.flatItems) {
-				item := m.flatItems[m.selectedIdx]
+			if m.sel.Index < len(m.flatItems) {
+				item := m.flatItems[m.sel.Index]
 				if item.kind == itemKindHeader {
 					m.collapsed[item.groupName] = !m.collapsed[item.groupName]
 					m.buildFlatItems()
 					m.updateViewport()
 				}
 			}
-		case "n":
+		case key.Matches(msg, m.keys.New):
 			req = &Request{OpenNewForm: true}
-		case "e":
+		case key.Matches(msg, m.keys.Edit):
 			if m.SelectedEntry() != nil {
 				req = &Request{OpenEditForm: true}
 			}
-		case "d":
+		case key.Matches(msg, m.keys.Delete):
 			sel := m.SelectedEntry()
 			if sel != nil {
 				m.showConfirmDelete = true
 				m.deleteTargetID = sel.ID
 			}
-		case "i":
+		case key.Matches(msg, m.keys.Delivery):
 			if m.SelectedEntry() != nil {
 				req = &Request{ToggleDelivery: true}
 			}
-		case "c":
+		case key.Matches(msg, m.keys.Copy):
 			if m.SelectedEntry() != nil {
 				req = &Request{CopyBody: true}
 			}
-		case "/":
+		case key.Matches(msg, m.keys.Search):
 			m.searchMode = true
 			m.searchInput.Focus()
-		case "R":
+		case key.Matches(msg, m.keys.Review):
 			req = &Request{SwitchToReview: true}
-		case "tab":
+		case key.Matches(msg, m.keys.Tab):
 			// Open the kind-filter dropdown. The dropdown opens on Enter when
 			// focused, so synthesize one (it is kept focused; see
 			// newKindDropdown). Return directly so the open command is not
 			// clobbered by the trailing viewport update.
 			if m.kindDD != nil {
 				m.kindDD.SetFocused(true)
-				m.kindDD, cmd = m.kindDD.Update(tea.KeyMsg{Type: tea.KeyEnter})
+				m.kindDD, cmd = m.kindDD.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 			}
 			return m, nil, cmd
+		case key.Matches(msg, m.keys.ToggleMarkdown):
+			m.renderMarkdown = !m.renderMarkdown
+			m.updateViewport()
+		case key.Matches(msg, m.keys.Undo):
+			req = &Request{Undo: true}
+		case key.Matches(msg, m.keys.History):
+			if m.SelectedEntry() != nil {
+				req = &Request{ShowHistory: true}
+			}
+		case key.Matches(msg, m.keys.Archive):
+			req = &Request{ToggleArchive: true}
+		case key.Matches(msg, m.keys.Restore):
+			if m.showArchived && m.SelectedEntry() != nil {
+				req = &Request{RestoreEntry: true}
+			}
+		case key.Matches(msg, m.keys.Purge):
+			if m.showArchived && m.SelectedEntry() != nil {
+				req = &Request{PurgeEntry: true}
+			}
+		case key.Matches(msg, m.keys.ConfirmYes):
+			if m.showHistory && len(m.historyRecords) > 0 {
+				req = &Request{RestoreHistory: true}
+			}
+		case key.Matches(msg, m.keys.SearchEsc):
+			if m.showHistory {
+				m.showHistory = false
+				m.historyRecords = nil
+				m.updateViewport()
+			}
 		}
 
-	case tea.MouseMsg:
-		// Only act on release events so each physical click fires exactly once
-		// (Bubble Tea emits both Press and Release for every click).
-		if msg.Action != tea.MouseActionRelease {
-			m.viewport, cmd = m.viewport.Update(msg)
-			return m, nil, cmd
-		}
-
+	case tea.MouseClickMsg:
 		// A click on the kind-filter trigger opens the dropdown (the panel is
 		// then routed all events by the open-guard at the top of Update).
-		if m.kindDD != nil && m.zoneManager.Get(kindDDZone).InBounds(msg) {
+		if m.kindDD != nil && m.zoneManager.Get(zones.EntriesKindDD).InBounds(msg) {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 			return m, nil, cmd
 		}
 
-		m.viewport, cmd = m.viewport.Update(msg)
-
-		if m.zoneManager.Get("action:new").InBounds(msg) {
+		if m.zoneManager.Get(zones.EntriesNew).InBounds(msg) {
 			req = &Request{OpenNewForm: true}
-		} else if m.zoneManager.Get("action:edit").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesEdit).InBounds(msg) {
 			if m.SelectedEntry() != nil {
 				req = &Request{OpenEditForm: true}
 			}
-		} else if m.zoneManager.Get("action:delete").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesDelete).InBounds(msg) {
 			sel := m.SelectedEntry()
 			if sel != nil {
 				m.showConfirmDelete = true
 				m.deleteTargetID = sel.ID
 			}
-		} else if m.zoneManager.Get("action:delivery").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesDelivery).InBounds(msg) {
 			if m.SelectedEntry() != nil {
 				req = &Request{ToggleDelivery: true}
 			}
-		} else if m.zoneManager.Get("action:copy").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesCopy).InBounds(msg) {
 			if m.SelectedEntry() != nil {
 				req = &Request{CopyBody: true}
 			}
-		} else if m.zoneManager.Get("action:search").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesSearch).InBounds(msg) {
 			m.searchMode = true
 			m.searchInput.Focus()
-		} else if m.zoneManager.Get("action:review").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.EntriesReview).InBounds(msg) {
 			req = &Request{SwitchToReview: true}
 		} else {
 			for i, item := range m.flatItems {
-				if m.zoneManager.Get(flatItemZone(i)).InBounds(msg) {
+				if m.zoneManager.Get(zones.EntriesRow(i)).InBounds(msg) {
 					if item.kind == itemKindHeader {
 						// Clicking a header toggles its group.
 						m.collapsed[item.groupName] = !m.collapsed[item.groupName]
 						m.buildFlatItems()
 					} else {
-						m.selectedIdx = i
+						m.sel.Index = i
 					}
 					m.updateViewport()
 					break
@@ -306,9 +372,13 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		}
 		return m, req, cmd
+
+	case tea.MouseWheelMsg:
+		m.detail, cmd = m.detail.Update(msg)
+		return m, nil, cmd
 	}
 
-	m.viewport, cmd = m.viewport.Update(msg)
+	m.detail, cmd = m.detail.Update(msg)
 	return m, req, cmd
 }
 
@@ -316,33 +386,21 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	listW := w * 35 / 100
-	detailW := w - listW - 1
-	contentH := h - 4
-	if contentH < 1 {
-		contentH = 1
+	m.pane = listpane.Compute(w, h, layout.EntriesFooterRows+2, 0)
+	m.detail.Resize(m.pane)
+	if m.md != nil {
+		m.md.SetWidth(m.pane.DetailVPW)
 	}
-	// The detail pane has a rounded border, so the viewport's usable area is
-	// 2 columns/rows smaller than the pane on each axis.
-	vpW := detailW - 2
-	if vpW < 1 {
-		vpW = 1
-	}
-	vpH := contentH - 2
-	if vpH < 1 {
-		vpH = 1
-	}
-	m.viewport = viewport.New(vpW, vpH)
 	m.updateViewport()
 }
 
 // SelectedEntry returns the currently selected entry, or nil if the cursor is
 // on a group header or the list is empty.
 func (m *Model) SelectedEntry() *entry.Entry {
-	if len(m.flatItems) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.flatItems) {
+	if len(m.flatItems) == 0 || m.sel.Index < 0 || m.sel.Index >= len(m.flatItems) {
 		return nil
 	}
-	item := m.flatItems[m.selectedIdx]
+	item := m.flatItems[m.sel.Index]
 	if item.kind != itemKindEntry {
 		return nil
 	}
@@ -353,7 +411,7 @@ func (m *Model) SelectedEntry() *entry.Entry {
 // SetSelectedKind sets the active kind filter.
 func (m *Model) SetSelectedKind(kind string) {
 	m.selectedKind = kind
-	m.selectedIdx = 0
+	m.sel.Index = 0
 }
 
 // SelectedKind returns the currently active kind filter.
@@ -384,6 +442,17 @@ func (m *Model) DeleteTargetID() string {
 // SearchQuery returns the current search query.
 func (m *Model) SearchQuery() string {
 	return m.searchInput.Value()
+}
+
+// ShowArchived reports whether the archive filter is active.
+func (m *Model) ShowArchived() bool { return m.showArchived }
+
+// SelectedHistoryID returns the selected history record ID, if any.
+func (m *Model) SelectedHistoryID() string {
+	if !m.showHistory || m.historySel < 0 || m.historySel >= len(m.historyRecords) {
+		return ""
+	}
+	return m.historyRecords[m.historySel].ID
 }
 
 // ── Grouping ──────────────────────────────────────────────────────────────────
@@ -467,9 +536,9 @@ func (m *Model) buildFlatItems() {
 
 	// Clamp the cursor.
 	if l := len(m.flatItems); l == 0 {
-		m.selectedIdx = 0
-	} else if m.selectedIdx >= l {
-		m.selectedIdx = l - 1
+		m.sel.Index = 0
+	} else {
+		m.sel.Clamp(l)
 	}
 }
 
@@ -477,16 +546,20 @@ func (m *Model) buildFlatItems() {
 
 // updateViewport refreshes the viewport content.
 func (m *Model) updateViewport() {
-	sel := m.SelectedEntry()
-	if sel == nil {
-		m.viewport.SetContent("No entries.")
+	if m.showHistory {
+		m.detail.SetContent(m.formatHistoryDetail())
 		return
 	}
-	m.viewport.SetContent(formatEntryDetail(*sel))
+	sel := m.SelectedEntry()
+	if sel == nil {
+		m.detail.SetContent("No entries.")
+		return
+	}
+	m.detail.SetContent(m.formatEntryDetail(*sel))
 }
 
 // formatEntryDetail formats an entry for the detail pane.
-func formatEntryDetail(e entry.Entry) string {
+func (m *Model) formatEntryDetail(e entry.Entry) string {
 	var sb strings.Builder
 	sb.WriteString("Kind:   " + e.Kind + "\n")
 	sb.WriteString("Name:   " + e.Name + "\n")
@@ -502,15 +575,38 @@ func formatEntryDetail(e entry.Entry) string {
 		}
 	}
 	if e.Body != "" {
-		sb.WriteString("\nBody:\n" + e.Body + "\n")
+		sb.WriteString("\nBody")
+		if m.renderMarkdown {
+			sb.WriteString(" (rendered, m=toggle):\n")
+			sb.WriteString(m.md.RenderBody(e.ID, e.Body))
+		} else {
+			sb.WriteString(" (raw, m=toggle):\n" + e.Body + "\n")
+		}
 	}
 	sb.WriteString("\nCreated: " + e.CreatedAt.Format("2006-01-02 15:04:05") + "\n")
 	sb.WriteString("Updated: " + e.UpdatedAt.Format("2006-01-02 15:04:05") + "\n")
+	if e.AccessCount > 0 && e.LastAccessedAt != nil {
+		fmt.Fprintf(&sb, "Accessed: %d times, last %s\n", e.AccessCount, e.LastAccessedAt.Format("2006-01-02 15:04"))
+	} else {
+		sb.WriteString("Accessed: never — consider on-demand delivery?\n")
+	}
 	return sb.String()
 }
 
-func flatItemZone(i int) string {
-	return fmt.Sprintf("flat:%d", i)
+func (m *Model) formatHistoryDetail() string {
+	if len(m.historyRecords) == 0 {
+		return "No history for this entry."
+	}
+	var sb strings.Builder
+	sb.WriteString("History (↑/↓, enter=restore, esc=close):\n\n")
+	for i, rec := range m.historyRecords {
+		marker := "  "
+		if i == m.historySel {
+			marker = "> "
+		}
+		fmt.Fprintf(&sb, "%s%s %s\n", marker, rec.CreatedAt.Format("2006-01-02 15:04:05"), rec.Action)
+	}
+	return sb.String()
 }
 
 // deliveryLabel describes an entry's delivery mode for the detail pane.

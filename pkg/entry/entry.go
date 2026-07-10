@@ -5,8 +5,9 @@ import "time"
 type Status string
 
 const (
-	StatusActive  Status = "active"
-	StatusPending Status = "pending"
+	StatusActive   Status = "active"
+	StatusPending  Status = "pending"
+	StatusArchived Status = "archived"
 )
 
 // Delivery controls how an entry is surfaced to agents.
@@ -36,6 +37,8 @@ type Entry struct {
 	TargetID   string     // for update proposals: ID of active entry being modified
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	AccessCount    int
+	LastAccessedAt *time.Time
 }
 
 // DeliveryOrDefault returns the entry's delivery mode, defaulting to

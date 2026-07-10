@@ -52,6 +52,31 @@ func FilterInit(entries []entry.Entry) []entry.Entry {
 	return out
 }
 
+// FilterInitByKinds returns init-delivery entries optionally limited to kinds.
+func FilterInitByKinds(entries []entry.Entry, kinds []string) []entry.Entry {
+	filtered := FilterInit(entries)
+	if len(kinds) == 0 {
+		return filtered
+	}
+	allowed := make(map[string]struct{}, len(kinds))
+	for _, k := range kinds {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			allowed[k] = struct{}{}
+		}
+	}
+	if len(allowed) == 0 {
+		return filtered
+	}
+	out := make([]entry.Entry, 0, len(filtered))
+	for _, e := range filtered {
+		if _, ok := allowed[e.Kind]; ok {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // Render turns the given active entries into a markdown initialization document.
 // Entries are grouped by kind; well-known kinds are ordered and introduced, and
 // any remaining kinds are appended under their own headings.

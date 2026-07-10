@@ -3,17 +3,12 @@ package review
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-)
-
-var (
-	styleSelected  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205"))
-	styleNormal    = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
-	styleDim       = lipgloss.NewStyle().Foreground(lipgloss.Color("240"))
-	stylePane      = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("240"))
-	styleActionBtn = lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Padding(0, 1)
-	styleBadgeNew  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("46")).Padding(0, 1)
-	styleBadgeUpd  = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("220")).Padding(0, 1)
+	"charm.land/lipgloss/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 )
 
 // View composes the full review tab view.
@@ -24,125 +19,78 @@ func (m *Model) View() string {
 
 	split := renderReviewSplit(m)
 	actionBar := renderReviewActionBar(m)
+	if m.loading {
+		actionBar += "\n" + m.spin.View() + theme.DimStyle.Render(" Approving all…")
+	}
 
 	return strings.Join([]string{split, actionBar}, "\n")
 }
 
 // renderReviewSplit renders the left/right split pane.
 func renderReviewSplit(m *Model) string {
-	listW := m.width * 35 / 100
-	detailW := m.width - listW - 1
-
-	contentH := m.height - 3
-	if contentH < 1 {
-		contentH = 1
-	}
-
-	leftPane := renderProposalList(m, listW, contentH)
-	rightPane := renderProposalDetail(m, detailW, contentH)
+	leftPane := renderProposalList(m, m.pane.ListW, m.pane.ContentH)
+	rightPane := renderProposalDetail(m, m.pane.DetailW, m.pane.ContentH)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, " ", rightPane)
 }
 
 // renderProposalList renders the proposal list in the left pane.
 func renderProposalList(m *Model, width, height int) string {
-	innerW := width - 2
-	if innerW < 1 {
-		innerW = 1
-	}
-	innerH := height - 2
-	if innerH < 1 {
-		innerH = 1
-	}
+	innerW, _ := layout.ViewportSize(width, height)
 
 	var rows []string
 	for i, p := range m.proposals {
-		badge := styleBadgeNew.Render("NEW")
+		badge := theme.BadgeNewStyle.Render("NEW")
 		if p.TargetID != "" {
-			badge = styleBadgeUpd.Render("UPD")
+			badge = theme.BadgeUpdStyle.Render("UPD")
 		}
 
 		name := p.Name
-		// Budget: prefix (2) + badge (5: "NEW"/"UPD" with Padding(0,1)) + space (1).
 		maxName := innerW - 8
 		if maxName < 1 {
 			maxName = 1
 		}
-		if len([]rune(name)) > maxName {
-			runes := []rune(name)
-			name = string(runes[:maxName-1]) + "…"
-		}
+		name = layout.Truncate(name, maxName)
 
 		prefix := "  "
-		if i == m.selectedIdx {
+		if i == m.sel.Index {
 			prefix = "▶ "
 		}
 
 		line := prefix + badge + " " + name
 
-		rowStyle := styleNormal
-		if i == m.selectedIdx {
-			rowStyle = styleSelected
+		rowStyle := theme.TextStyle
+		if i == m.sel.Index {
+			rowStyle = theme.Selected
 		}
-		// Pad the row to the full inner width so the entire row is a clickable
-		// zone, not just the text. The Mark must wrap the padded string.
 		rendered := rowStyle.Width(innerW).Render(line)
-
-		zoneID := proposalRowZone(i)
-		rows = append(rows, m.zoneManager.Mark(zoneID, rendered))
+		rows = append(rows, m.zoneManager.Mark(zones.ReviewRow(i), rendered))
 	}
 
 	if len(rows) == 0 {
-		rows = append(rows, styleDim.Render("  No pending proposals"))
+		rows = append(rows, theme.DimStyle.Render("  No pending proposals"))
 	}
 
-	for len(rows) < innerH {
-		rows = append(rows, "")
-	}
-	if len(rows) > innerH {
-		rows = rows[:innerH]
-	}
-
-	content := strings.Join(rows, "\n")
-	// Size the bordered box to the inner area; the rounded border adds the
-	// remaining 2 rows/cols so the pane occupies exactly width × height.
-	return stylePane.Width(innerW).Height(innerH).Render(content)
+	return listpane.RenderList(width, height, rows)
 }
 
 // renderProposalDetail renders the selected proposal detail in the right pane.
 func renderProposalDetail(m *Model, width, height int) string {
-	innerW := width - 2
-	if innerW < 1 {
-		innerW = 1
-	}
-	innerH := height - 2
-	if innerH < 1 {
-		innerH = 1
-	}
-
-	content := m.viewport.View()
-
-	// Inline action buttons — these are also in the detail text, but add zone marks here for mouse support
-	approveBtn := m.zoneManager.Mark("detail:approve", styleActionBtn.Render("[ ✓ Approve ]"))
-	rejectBtn := m.zoneManager.Mark("detail:reject", styleActionBtn.Render("[ ✗ Reject ]"))
-	editBtn := m.zoneManager.Mark("detail:edit", styleActionBtn.Render("[ ✎ Edit ]"))
+	approveBtn := m.zoneManager.Mark(zones.ReviewDetailApprove, theme.ActionBtn.Render("[ ✓ Approve ]"))
+	rejectBtn := m.zoneManager.Mark(zones.ReviewDetailReject, theme.ActionBtn.Render("[ ✗ Reject ]"))
+	editBtn := m.zoneManager.Mark(zones.ReviewDetailEdit, theme.ActionBtn.Render("[ ✎ Edit ]"))
 	buttons := lipgloss.JoinHorizontal(lipgloss.Top, approveBtn, rejectBtn, editBtn)
 
-	fullContent := content + "\n" + buttons
-	// Size the bordered box to the inner area so the border doesn't push the
-	// pane past its allotted height (which previously hid the tab bar).
-	return stylePane.Width(innerW).Height(innerH).Render(fullContent)
+	return m.detail.RenderPane(width, height, buttons)
 }
 
 // renderReviewActionBar renders the action buttons at the bottom.
 func renderReviewActionBar(m *Model) string {
-	approveBtn := m.zoneManager.Mark("action:approve", styleActionBtn.Render("[ a Approve ]"))
-	rejectBtn := m.zoneManager.Mark("action:reject", styleActionBtn.Render("[ r Reject ]"))
-	editBtn := m.zoneManager.Mark("action:edit-review", styleActionBtn.Render("[ e Edit ]"))
-	approveAllBtn := m.zoneManager.Mark("action:approve-all", styleActionBtn.Render("[ A Approve All ]"))
-	escBtn := styleActionBtn.Render("[ esc Entries ]")
-
-	return lipgloss.JoinHorizontal(lipgloss.Top,
-		approveBtn, rejectBtn, editBtn, approveAllBtn, escBtn,
-	)
+	return keymap.RenderActionBar(m.zoneManager, []keymap.ActionZone{
+		{ZoneID: zones.ReviewApprove, Binding: m.keys.Approve},
+		{ZoneID: zones.ReviewReject, Binding: m.keys.Reject},
+		{ZoneID: zones.ReviewEdit, Binding: m.keys.Edit},
+		{ZoneID: zones.ReviewApproveAll, Binding: m.keys.ApproveAll},
+		{ZoneID: "", Binding: m.keys.Back},
+	})
 }

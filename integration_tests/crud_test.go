@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/madicen/naitv-mcp/internal/tui/tabs/entries"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -42,10 +41,27 @@ func TestJourney_CreateEntry(t *testing.T) {
 		t.Error("expected new-repo in store after create")
 	}
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "new-repo") {
 		t.Errorf("expected new-repo in view, got:\n%s", view)
 	}
+}
+
+// TestJourney_FormSaveTyping types into the form and saves via ctrl+s.
+func TestJourney_FormSaveTyping(t *testing.T) {
+	st := newTestDB(t)
+	m := newTestModel(t, st)
+	m = runPendingCmds(m, key("n"), 3)
+	m = typeString(m, "tool")
+	m = pressTab(m)
+	m = typeString(m, "typed-entry")
+	runPendingCmds(m, key("ctrl+s"), 15)
+	active, err := st.List("", nil)
+	if err != nil { t.Fatalf("list: %v", err) }
+	for _, e := range active {
+		if e.Name == "typed-entry" && e.Kind == "tool" { return }
+	}
+	t.Fatal("expected typed-entry in store after ctrl+s save")
 }
 
 // TestJourney_EditEntry seeds an entry, loads it, presses 'e' and verifies
@@ -112,24 +128,27 @@ func TestJourney_DeleteEntry(t *testing.T) {
 	}
 }
 
-// TestJourney_FormFieldAddRemove verifies that pressing 'n' opens the form
-// and the view transitions (form state visible).
+// TestJourney_FormFieldAddRemove adds a custom field, saves, and verifies Fields.
 func TestJourney_FormFieldAddRemove(t *testing.T) {
 	st := newTestDB(t)
 	m := newTestModel(t, st)
-
-	// Open new entry form.
 	m = runPendingCmds(m, key("n"), 3)
-
-	// The form should now be visible — view should not be empty.
-	view := m.View()
-	if view == "" {
-		t.Error("expected non-empty view after pressing n")
+	m = typeString(m, "note")
+	m = pressTab(m)
+	m = typeString(m, "field-entry")
+	m = pressTab(m)
+	m = runPendingCmds(m, key("enter"), 5)
+	m = typeString(m, "env")
+	m = pressTab(m)
+	m = typeString(m, "prod")
+	runPendingCmds(m, key("ctrl+s"), 15)
+	active, err := st.List("", nil)
+	if err != nil { t.Fatalf("list: %v", err) }
+	for i := range active {
+		if active[i].Name == "field-entry" {
+			if active[i].Fields["env"] != "prod" { t.Fatalf("fields=%#v", active[i].Fields) }
+			return
+		}
 	}
-
-	// Press Escape to cancel form.
-	m = runPendingCmds(m, keyType(tea.KeyEsc), 3)
-
-	// Form should be hidden now.
-	_ = m.View()
+	t.Fatal("expected field-entry in store")
 }

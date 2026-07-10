@@ -4,9 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/diff"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
+	"github.com/madicen/naitv-mcp/internal/tui/markdown"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -16,26 +24,45 @@ type Request struct {
 	ApproveSelected bool
 	RejectSelected  bool
 	EditSelected    bool
+	EditBody        bool
 	ApproveAll      bool
 	SwitchToEntries bool
 }
 
 // Model holds the state for the review tab.
 type Model struct {
-	zoneManager   *zone.Manager
-	proposals     []entry.Entry
-	selectedIdx   int
+	zoneManager *zone.Manager
+	proposals   []entry.Entry
+	targets     map[string]entry.Entry
 	width, height int
-	viewport      viewport.Model
+
+	pane   listpane.Layout
+	detail listpane.Detail
+	sel    listpane.Selection
+	keys   keymap.Review
+	md     *markdown.Renderer
+	renderMarkdown bool
+	loading bool
+	spin    spinner.Model
 }
 
 // NewModel creates a new review Model.
 func NewModel(zm *zone.Manager) Model {
-	vp := viewport.New(0, 0)
+	spin := spinner.New()
+	spin.Spinner = spinner.Dot
+	spin.Style = theme.DimStyle
 	return Model{
 		zoneManager: zm,
-		viewport:    vp,
+		detail:      listpane.NewDetail(),
+		keys:        keymap.DefaultReview,
+		md:          markdown.NewRenderer(80),
+		spin:        spin,
 	}
+}
+
+func (m *Model) startLoading() tea.Cmd {
+	m.loading = true
+	return m.spin.Tick
 }
 
 // Init returns the initial command.
@@ -49,11 +76,21 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	var req *Request
 
 	switch msg := msg.(type) {
+	case spinner.TickMsg:
+		if m.loading {
+			m.spin, cmd = m.spin.Update(msg)
+			return m, nil, cmd
+		}
+		return m, nil, nil
+
 	case ProposalsLoadedMsg:
 		m.proposals = msg.Proposals
-		if m.selectedIdx >= len(m.proposals) {
-			m.selectedIdx = intMax(0, len(m.proposals)-1)
-		}
+		m.sel.Clamp(len(m.proposals))
+		m.updateViewport()
+		return m, nil, nil
+
+	case TargetsLoadedMsg:
+		m.targets = msg.Targets
 		m.updateViewport()
 		return m, nil, nil
 
@@ -65,9 +102,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		}
 		m.proposals = newProps
-		if m.selectedIdx >= len(m.proposals) {
-			m.selectedIdx = intMax(0, len(m.proposals)-1)
-		}
+		m.sel.Clamp(len(m.proposals))
 		m.updateViewport()
 		return m, nil, nil
 
@@ -79,15 +114,14 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			}
 		}
 		m.proposals = newProps
-		if m.selectedIdx >= len(m.proposals) {
-			m.selectedIdx = intMax(0, len(m.proposals)-1)
-		}
+		m.sel.Clamp(len(m.proposals))
 		m.updateViewport()
 		return m, nil, nil
 
 	case AllApprovedMsg:
+		m.loading = false
 		m.proposals = nil
-		m.selectedIdx = 0
+		m.sel.Index = 0
 		m.updateViewport()
 		return m, nil, nil
 
@@ -95,82 +129,91 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		m.SetDimensions(msg.Width, msg.Height)
 		return m, nil, nil
 
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "j", "down":
-			if m.selectedIdx < len(m.proposals)-1 {
-				m.selectedIdx++
+	case tea.KeyPressMsg:
+		switch {
+		case key.Matches(msg, m.keys.Down):
+			if m.sel.MoveDown(len(m.proposals)) {
 				m.updateViewport()
 			}
-		case "k", "up":
-			if m.selectedIdx > 0 {
-				m.selectedIdx--
+		case key.Matches(msg, m.keys.Up):
+			if m.sel.MoveUp() {
 				m.updateViewport()
 			}
-		case "a":
+		case key.Matches(msg, m.keys.Approve):
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveSelected: true}
 			}
-		case "r":
+		case key.Matches(msg, m.keys.Reject):
 			if len(m.proposals) > 0 {
 				req = &Request{RejectSelected: true}
 			}
-		case "e":
+		case key.Matches(msg, m.keys.Edit):
 			if len(m.proposals) > 0 {
 				req = &Request{EditSelected: true}
 			}
-		case "A":
+		case key.Matches(msg, m.keys.EditBody):
+			if len(m.proposals) > 0 {
+				req = &Request{EditBody: true}
+			}
+		case key.Matches(msg, m.keys.ApproveAll):
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveAll: true}
+				return m, req, m.startLoading()
 			}
-		case "esc":
+		case key.Matches(msg, m.keys.Back):
 			req = &Request{SwitchToEntries: true}
+		case key.Matches(msg, m.keys.ToggleMarkdown):
+			m.renderMarkdown = !m.renderMarkdown
+			m.updateViewport()
 		}
 
-	case tea.MouseMsg:
-		m.viewport, cmd = m.viewport.Update(msg)
-
-		if m.zoneManager.Get("action:approve").InBounds(msg) {
+	case tea.MouseClickMsg:
+		if m.zoneManager.Get(zones.ReviewApprove).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveSelected: true}
 			}
-		} else if m.zoneManager.Get("action:reject").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewReject).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{RejectSelected: true}
 			}
-		} else if m.zoneManager.Get("action:edit-review").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewEdit).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{EditSelected: true}
 			}
-		} else if m.zoneManager.Get("action:approve-all").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewApproveAll).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveAll: true}
+				return m, req, m.startLoading()
 			}
-		} else if m.zoneManager.Get("detail:approve").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewDetailApprove).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveSelected: true}
 			}
-		} else if m.zoneManager.Get("detail:reject").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewDetailReject).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{RejectSelected: true}
 			}
-		} else if m.zoneManager.Get("detail:edit").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.ReviewDetailEdit).InBounds(msg) {
 			if len(m.proposals) > 0 {
 				req = &Request{EditSelected: true}
 			}
 		} else {
 			for i := range m.proposals {
-				if m.zoneManager.Get(proposalRowZone(i)).InBounds(msg) {
-					m.selectedIdx = i
+				if m.zoneManager.Get(zones.ReviewRow(i)).InBounds(msg) {
+					m.sel.Index = i
 					m.updateViewport()
 					break
 				}
 			}
 		}
 		return m, req, cmd
+
+	case tea.MouseWheelMsg:
+		m.detail, cmd = m.detail.Update(msg)
+		return m, req, cmd
 	}
 
-	m.viewport, cmd = m.viewport.Update(msg)
+	m.detail, cmd = m.detail.Update(msg)
 	return m, req, cmd
 }
 
@@ -178,32 +221,20 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	listW := w * 35 / 100
-	detailW := w - listW - 1
-	contentH := h - 3
-	if contentH < 1 {
-		contentH = 1
+	m.pane = listpane.Compute(w, h, layout.ReviewFooterRows+2, 1)
+	m.detail.Resize(m.pane)
+	if m.md != nil {
+		m.md.SetWidth(m.pane.DetailVPW)
 	}
-	// The detail viewport lives inside the rounded pane (−2 cols/rows) and
-	// shares it with the inline action-button line (−1 row).
-	vpW := detailW - 2
-	if vpW < 1 {
-		vpW = 1
-	}
-	vpH := contentH - 3
-	if vpH < 1 {
-		vpH = 1
-	}
-	m.viewport = viewport.New(vpW, vpH)
 	m.updateViewport()
 }
 
 // SelectedProposal returns the currently selected proposal or nil.
 func (m *Model) SelectedProposal() *entry.Entry {
-	if len(m.proposals) == 0 || m.selectedIdx < 0 || m.selectedIdx >= len(m.proposals) {
+	if len(m.proposals) == 0 || m.sel.Index < 0 || m.sel.Index >= len(m.proposals) {
 		return nil
 	}
-	p := m.proposals[m.selectedIdx]
+	p := m.proposals[m.sel.Index]
 	return &p
 }
 
@@ -220,14 +251,14 @@ func (m *Model) SelectedID() string {
 func (m *Model) updateViewport() {
 	p := m.SelectedProposal()
 	if p == nil {
-		m.viewport.SetContent("No proposals.")
+		m.detail.SetContent("No proposals.")
 		return
 	}
-	m.viewport.SetContent(formatProposalDetail(*p))
+	m.detail.SetContent(m.formatProposalDetail(*p))
 }
 
 // formatProposalDetail formats a proposal for the detail pane.
-func formatProposalDetail(p entry.Entry) string {
+func (m *Model) formatProposalDetail(p entry.Entry) string {
 	var sb strings.Builder
 
 	// Warn before anything else when the proposal would register a shell command.
@@ -235,7 +266,11 @@ func formatProposalDetail(p entry.Entry) string {
 		sb.WriteString("⚠  EXECUTABLE TOOL PROPOSAL\n")
 		sb.WriteString("   Approving this will register a shell command that runs\n")
 		sb.WriteString("   on the server when the model calls the tool. Review the\n")
-		sb.WriteString("   exec field carefully before approving.\n\n")
+		sb.WriteString("   exec field carefully before approving.\n")
+		if def, err := tools.ParseDef(p); err == nil {
+			fmt.Fprintf(&sb, "\nCommand: %s\n", tools.ShellCommandLine(def, nil))
+		}
+		sb.WriteString("\n")
 	}
 
 	badge := "NEW"
@@ -258,21 +293,47 @@ func formatProposalDetail(p entry.Entry) string {
 
 	if p.TargetID != "" {
 		sb.WriteString("\nTarget ID: " + p.TargetID + "\n")
-		sb.WriteString("\nChanges proposed:\n")
-		if p.Name != "" {
-			sb.WriteString("  ~ name → " + p.Name + "\n")
-		}
-		if p.Body != "" {
-			sb.WriteString("  ~ body → " + p.Body + "\n")
-		}
-		if p.Kind != "" {
-			sb.WriteString("  ~ kind → " + p.Kind + "\n")
-		}
-		if len(p.Tags) > 0 {
-			sb.WriteString("  ~ tags → " + strings.Join(p.Tags, ", ") + "\n")
-		}
-		for k, v := range p.Fields {
-			sb.WriteString("  ~ " + k + " → " + v + "\n")
+		sb.WriteString("\nChanges proposed:\n\n")
+		if target, ok := m.targets[p.TargetID]; ok {
+			if p.Name != "" && p.Name != target.Name {
+				sb.WriteString(diff.Unified("name", target.Name, p.Name))
+				sb.WriteString("\n\n")
+			}
+			if p.Kind != "" && p.Kind != target.Kind {
+				sb.WriteString(diff.Unified("kind", target.Kind, p.Kind))
+				sb.WriteString("\n\n")
+			}
+			if p.Body != "" && p.Body != target.Body {
+				sb.WriteString(diff.Unified("body", target.Body, p.Body))
+				sb.WriteString("\n\n")
+			}
+			if len(p.Tags) > 0 {
+				oldTags := strings.Join(target.Tags, ", ")
+				newTags := strings.Join(p.Tags, ", ")
+				if oldTags != newTags {
+					sb.WriteString(diff.Unified("tags", oldTags, newTags))
+					sb.WriteString("\n\n")
+				}
+			}
+			if fieldsDiff := diff.FieldsDiff(target.Fields, p.Fields); fieldsDiff != "" {
+				sb.WriteString(fieldsDiff)
+			}
+		} else {
+			if p.Name != "" {
+				sb.WriteString("  ~ name → " + p.Name + "\n")
+			}
+			if p.Body != "" {
+				sb.WriteString("  ~ body → " + p.Body + "\n")
+			}
+			if p.Kind != "" {
+				sb.WriteString("  ~ kind → " + p.Kind + "\n")
+			}
+			if len(p.Tags) > 0 {
+				sb.WriteString("  ~ tags → " + strings.Join(p.Tags, ", ") + "\n")
+			}
+			for k, v := range p.Fields {
+				sb.WriteString("  ~ " + k + " → " + v + "\n")
+			}
 		}
 	} else {
 		if len(p.Fields) > 0 {
@@ -282,23 +343,15 @@ func formatProposalDetail(p entry.Entry) string {
 			}
 		}
 		if p.Body != "" {
-			sb.WriteString("\nBody:\n" + p.Body + "\n")
+			sb.WriteString("\nBody")
+			if m.renderMarkdown {
+				sb.WriteString(" (rendered, m=toggle):\n")
+				sb.WriteString(m.md.RenderBody(p.ID, p.Body))
+			} else {
+				sb.WriteString(" (raw, m=toggle):\n" + p.Body + "\n")
+			}
 		}
 	}
 
-	sb.WriteString("\n")
-	sb.WriteString("[ ✓ Approve (a) ]  [ ✗ Reject (r) ]  [ ✎ Edit (e) ]\n")
-
 	return sb.String()
-}
-
-func proposalRowZone(i int) string {
-	return fmt.Sprintf("proposal:%d", i)
-}
-
-func intMax(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

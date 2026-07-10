@@ -3,6 +3,8 @@ package plugin
 import (
 	"encoding/json"
 	"fmt"
+
+	"github.com/madicen/naitv-mcp/internal/xpath"
 )
 
 // DefaultRegistryURL is the well-known public registry hosted in madicen/naitv-plugins.
@@ -33,7 +35,7 @@ func LoadRegistry(url string) (Registry, error) {
 		err  error
 	)
 	// Reuse the same URL/file detection logic as Load.
-	if isHTTP(url) {
+	if xpath.IsHTTP(url) {
 		data, err = fetchURL(url)
 	} else {
 		data, err = readFile(url)
@@ -56,9 +58,4 @@ func (r Registry) Find(name string) *RegistryEntry {
 		}
 	}
 	return nil
-}
-
-// isHTTP reports whether url begins with http:// or https://.
-func isHTTP(url string) bool {
-	return len(url) >= 7 && (url[:7] == "http://" || (len(url) >= 8 && url[:8] == "https://"))
 }

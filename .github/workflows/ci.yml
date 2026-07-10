@@ -1,41 +1,40 @@
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
-
-      - name: Build
-        run: go build -v ./...
-
-      - name: Run tests
-        run: go test -v ./...
-
+          go-version: '1.25.12'
+      - run: go build -v ./...
+      - run: go test -race -v ./...
+      - run: |
+          pkgs=$(go list ./... | grep -v '/cmd/')
+          go test -race -coverprofile=coverage.out -covermode=atomic $pkgs
+          go tool cover -func=coverage.out | tee coverage.txt
+          pct=$(awk '/^total:/ {gsub("%","",$3); print $3}' coverage.txt)
+          echo "Total coverage (excluding cmd): ${pct}%"
+          awk -v p="$pct" 'BEGIN { if (p+0 < 60) { print "Coverage below 60% soft floor: " p "%"; exit 1 } }'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+      - run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
   lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version: '1.25'
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v8
+          go-version: '1.25.12'
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.12.0

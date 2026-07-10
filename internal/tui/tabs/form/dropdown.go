@@ -3,70 +3,19 @@ package form
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	tea "charm.land/bubbletea/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
 	overlay "github.com/madicen/bubble-overlay"
-	"github.com/madicen/naitv-mcp/internal/tui/theme"
+	"github.com/madicen/naitv-mcp/internal/tui/components/kinddropdown"
 )
-
-// kindDDZone is the bubblezone ID for the Kind dropdown trigger.
-const kindDDZone = "form:kind-dd"
-
-// newKindOption is the sentinel option (always last) that switches the form
-// into free-text "new kind" mode.
-const newKindOption = "+ New kind…"
-
-// kindLabelWidth is the rendered width of the "Kind:" label column. It must
-// match styleLabel's Width so the dropdown trigger's computed bounds line up
-// with where the trigger is actually drawn.
-const kindLabelWidth = 10
-
-// filterKinds drops empty kinds, preserving order.
-func filterKinds(kinds []string) []string {
-	out := make([]string, 0, len(kinds))
-	for _, k := range kinds {
-		if k != "" {
-			out = append(out, k)
-		}
-	}
-	return out
-}
-
-// displayKind capitalizes the first rune of a kind for display.
-func displayKind(k string) string {
-	if k == "" {
-		return k
-	}
-	r := []rune(k)
-	return strings.ToUpper(string(r[0])) + string(r[1:])
-}
-
-// buildKindDropdown builds the Kind dropdown: each existing (non-empty) kind
-// followed by the "+ New kind…" sentinel.
-func buildKindDropdown(zm *zone.Manager, ddKinds []string) *bubbledropdown.Dropdown {
-	opts := make([]string, 0, len(ddKinds)+1)
-	for _, k := range ddKinds {
-		opts = append(opts, displayKind(k))
-	}
-	opts = append(opts, newKindOption)
-
-	d := bubbledropdown.New(
-		bubbledropdown.WithOptions(opts),
-		bubbledropdown.WithPlaceholder("kind"),
-		bubbledropdown.WithAccentColor(theme.Accent),
-	)
-	d.SetZoneManager(zm)
-	return d
-}
 
 // SetKinds rebuilds the Kind dropdown from the given kind set and resets the
 // selection to a sane default. Callers populate the specific kind afterward
 // (PopulateFrom -> setKind) for edit modes.
 func (m *Model) SetKinds(kinds []string) {
 	m.kinds = kinds
-	m.ddKinds = filterKinds(kinds)
-	m.kindDD = buildKindDropdown(m.zoneManager, m.ddKinds)
+	m.ddKinds = kinddropdown.FilterKinds(kinds)
+	m.kindDD = kinddropdown.BuildForm(m.zoneManager, m.ddKinds)
 	m.setKind("")
 	m.syncKindFocus()
 }
@@ -120,7 +69,7 @@ func (m *Model) selectedKind() string {
 
 // isNewKindIndex reports whether option index i is the "+ New kind…" sentinel.
 func (m *Model) isNewKindIndex(i int) bool {
-	return i >= len(m.ddKinds)
+	return kinddropdown.IsNewKindIndex(i, len(m.ddKinds))
 }
 
 // syncKindFocus marks the dropdown trigger focused only when the Kind field
@@ -135,7 +84,7 @@ func (m *Model) syncKindFocus() {
 // handleKindChosen applies an ItemChosenMsg: the sentinel enters new-kind mode
 // (focusing the text input); any other option selects that kind.
 func (m Model) handleKindChosen(msg tea.Msg) (Model, tea.Cmd) {
-	cm, _ := msg.(bubbledropdown.ItemChosenMsg)
+	cm, _ := msg.(dropdownv2.ItemChosenMsg)
 	if m.kindDD != nil {
 		m.kindDD, _ = m.kindDD.Update(msg)
 	}
@@ -170,13 +119,10 @@ func (m *Model) ComposeDropdownOverlay(mainView string, w, h int) string {
 	if originLeft < 0 {
 		originLeft = 0
 	}
-	// styleFormPanel has a rounded border (1 cell) and Padding(1, 2): content
-	// begins 2 rows down (border + top padding) and 3 cols in (border + left
-	// padding). The trigger then sits past the "Kind:" label.
 	const panelTop = 2
 	const panelLeft = 3
 	triggerRow := originTop + panelTop + m.kindDDRow
-	triggerCol := originLeft + panelLeft + kindLabelWidth
+	triggerCol := originLeft + panelLeft + kinddropdown.KindLabelWidth
 	tw, th := m.kindDD.TriggerSize()
 	m.kindDD.SetBounds(triggerRow, triggerCol, tw, th)
 	return m.kindDD.ViewWithOverlay(mainView, w, h)

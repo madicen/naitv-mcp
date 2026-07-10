@@ -29,7 +29,7 @@
 //
 // Agents may call add_entry with kind="tool" and an exec field, which queues the
 // definition as a pending proposal — just like any other entry. Approve it in the
-// Review tab and it goes live on the next server restart. This is the human-in-the-
+// Review tab and it goes live without restarting the server. This is the human-in-the-
 // loop gate that prevents arbitrary code from being executed without your sign-off.
 package tools
 
@@ -72,6 +72,9 @@ type Def struct {
 	// Disabled prevents execution while keeping the tool registered.
 	// Set the "disabled" field to "true" in the entry to use this.
 	Disabled bool
+	// EnvAllowlist lists environment variable names passed to the subprocess.
+	// When empty, defaults to PATH and HOME only.
+	EnvAllowlist []string
 }
 
 // IsExecutable reports whether the entry should be treated as an executable
@@ -123,6 +126,14 @@ func ParseDef(e entry.Entry) (Def, error) {
 
 	if v := strings.TrimSpace(e.Fields["disabled"]); v == "true" || v == "1" || v == "yes" {
 		d.Disabled = true
+	}
+
+	if ea := strings.TrimSpace(e.Fields["env_allowlist"]); ea != "" {
+		for _, part := range strings.Split(ea, ",") {
+			if key := strings.TrimSpace(part); key != "" {
+				d.EnvAllowlist = append(d.EnvAllowlist, key)
+			}
+		}
 	}
 
 	return d, nil

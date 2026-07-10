@@ -4,7 +4,7 @@
 
 A local **[Model Context Protocol](https://modelcontextprotocol.io/) server** and **terminal UI** for managing the context you give AI agents. It is a personal, human-in-the-loop knowledge base: you curate structured entries (rules, tooling preferences, workflows, repos, facts, notes), agents read them and can *propose* new ones, and you approve proposals from the TUI before they go live.
 
-Built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), [Lip Gloss](https://github.com/charmbracelet/lipgloss), [Bubblezone](https://github.com/lrstanley/bubblezone), and [mcp-go](https://github.com/mark3labs/mcp-go), backed by SQLite (with FTS5 full-text search).
+Built with [Bubble Tea v2](https://github.com/charmbracelet/bubbletea), [Lip Gloss v2](https://github.com/charmbracelet/lipgloss), [Bubblezone v2](https://github.com/lrstanley/bubblezone), and the [official MCP Go SDK](https://github.com/modelcontextprotocol/go-sdk), backed by SQLite (with FTS5 full-text search).
 
 ## Why
 
@@ -18,7 +18,7 @@ You decide which is which, per entry, from the TUI.
 ## Features
 
 - **MCP server** (`naitv-mcp serve`): exposes your context to any MCP client over stdio.
-- **Terminal UI** (`naitv-mcp`): browse, search, create, edit, delete, and review entries with keyboard + mouse.
+- **Terminal UI** (`naitv-mcp`): browse, search, create, edit, delete, review entries, and manage plugins with keyboard + mouse.
 - **Human-in-the-loop**: agents can only *read* active entries and *propose* writes; proposals queue as `pending` until you approve them in the **Review** tab.
 - **Initialization bundle**: the `initialize` tool and `naitv-mcp init` render your entries into a single instruction document (e.g. `AGENTS.md`).
 - **Per-entry delivery**: mark each entry `init` (in the bundle) or `on-demand` (fetched directly) with one keystroke.
@@ -118,6 +118,21 @@ naitv-mcp --demo       # seeded demo data (does not touch your real DB)
 ```bash
 naitv-mcp serve                 # stdio MCP server, default DB
 naitv-mcp serve --db /path.db   # custom database
+naitv-mcp serve --http :8321 --token secret   # streamable HTTP (optional)
+```
+
+### Export, import, and doctor
+
+```bash
+naitv-mcp export [--out file.json]     # backup all entries
+naitv-mcp import file.json [--replace] # restore from export
+naitv-mcp doctor                       # DB/FTS health checks + client config snippets
+```
+
+### Init bundle with kind filter
+
+```bash
+naitv-mcp init --kinds rule,tool       # slimmer initialization document
 ```
 
 Wire it into Cursor via `.cursor/mcp.json`:
@@ -151,8 +166,18 @@ naitv-mcp seed-demo    # idempotent; populates the default DB if empty
 | `search_entries` | Full-text search over active entries (`query`). |
 | `add_entry` | Propose a new entry (queued as `pending` for review). |
 | `update_entry` | Propose an update to an existing active entry (queued as `pending`). |
+| `list_tools` | List active executable tool entries (`kind=tool` with an `exec` field). |
+| `install_plugin` | Install a plugin from URL, path, or registry name (proposals queued for review). |
+| `list_plugins` | List installed plugins with version and entry count. |
+| `list_available_plugins` | Fetch plugins from the public registry (or a custom `registry_url`). |
+| `uninstall_plugin` | Remove a plugin and all of its entries. |
+| `set_project` | Update `working_dir` on all active executable tools to a project root. |
+| `export_entries` | Export all entries as JSON for backup or sync. |
+| `generate_continue_config` | Generate a `.continue/config.yaml` wired to this server. |
 
 Write tools never modify active data directly — they always create a proposal you approve in the TUI.
+
+**Dynamic executable tools:** any active `kind=tool` entry with an `exec` field is also registered as an MCP tool (named after the entry). Agents can call these after you approve them in the Review tab; the server hot-reloads tools automatically and emits `tools/list_changed` — no restart needed.
 
 ## Keyboard reference
 
@@ -165,7 +190,14 @@ Write tools never modify active data directly — they always create a proposal 
 | `e` | Edit selected entry |
 | `d` | Delete selected entry (with confirm) |
 | `i` | Toggle delivery: init ↔ on-demand |
+| `c` | Copy entry body to clipboard |
 | `/` | Search |
+| `m` | Toggle markdown rendering in detail pane |
+| `u` | Undo last destructive action |
+| `H` | View entry history |
+| `a` | Toggle archived entries view |
+| `v` | Restore archived entry (when viewing archive) |
+| `P` | Permanently purge archived entry |
 | `tab` | Cycle the kind filter |
 | `R` | Go to Review tab |
 | `q` / `Ctrl+C` | Quit |
@@ -177,6 +209,7 @@ Write tools never modify active data directly — they always create a proposal 
 | `tab` / `shift+tab` | Move between fields |
 | `enter` | Activate the focused button (add field / save / cancel) |
 | `Ctrl+S` | Save |
+| `Ctrl+E` | Open body in `$EDITOR` |
 | `esc` | Cancel |
 
 ### Review tab
@@ -187,10 +220,24 @@ Write tools never modify active data directly — they always create a proposal 
 | `a` | Approve selected proposal |
 | `r` | Reject selected proposal |
 | `e` | Edit before approving |
+| `Ctrl+E` | Open proposal body in `$EDITOR` |
+| `m` | Toggle markdown rendering in detail pane |
 | `A` | Approve all |
 | `esc` | Back to Entries |
 
 Most actions are also clickable via the on-screen buttons and tabs.
+
+### Plugins tab
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Move selection |
+| `i` | Install selected plugin (browse mode) or enter custom install URL |
+| `u` | Uninstall selected plugin (installed mode) |
+| `tab` | Switch between Installed and Browse views |
+| `r` | Refresh the plugin registry |
+
+Browse the public plugin registry, install plugins (entries land in Review for approval), and uninstall installed plugins.
 
 ## Configuration
 
@@ -205,12 +252,15 @@ Most actions are also clickable via the on-screen buttons and tabs.
 
 ```
 naitv-mcp/
-├── cmd/naitv-mcp/main.go     # entry point: TUI, serve, init, seed-demo
+├── cmd/naitv-mcp/main.go     # entry point: TUI, serve, init, export, import, doctor, seed-demo
 ├── internal/
 │   ├── mcp/server.go           # MCP tool definitions & handlers
 │   ├── instructions/           # renders entries → initialization document
 │   ├── store/store.go          # SQLite CRUD + FTS + approval workflow
-│   └── tui/                    # Bubble Tea models (entries, review, form)
+│   ├── tools/                  # executable tool defs + sh -c runner
+│   ├── plugin/                 # JSON manifest install/uninstall
+│   ├── setup/                  # set_project, continue config helpers
+│   └── tui/                    # Bubble Tea models (entries, review, plugins, form)
 ├── pkg/entry/entry.go          # Entry domain type
 ├── integration_tests/          # end-to-end TUI journeys
 ├── vhs/                        # VHS tapes for screenshots

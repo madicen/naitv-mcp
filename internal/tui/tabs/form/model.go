@@ -1,14 +1,19 @@
 package form
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	zone "github.com/lrstanley/bubblezone"
-	bubbledropdown "github.com/madicen/bubble-dropdown"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
+	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/components/kinddropdown"
+	"github.com/madicen/naitv-mcp/internal/tui/editor"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -42,11 +47,7 @@ type Model struct {
 	visible       bool
 	focusIdx      int
 	kind          textinput.Model
-	name          textinput.Model
-	group         textinput.Model
-	tags          textinput.Model
 	fields        []FieldPair
-	body          textinput.Model
 	// Pass-through fields: not exposed in the form UI but must survive
 	// PopulateFrom → ToEntry so store.Update doesn't zero them out.
 	sourceID         string
@@ -63,10 +64,13 @@ type Model struct {
 	// "+ New kind…" sentinel. When newKindMode is set the kind textinput is
 	// revealed for free-text entry. kinds is the raw set; ddKinds is the
 	// non-empty subset used for the option-index ↔ kind mapping.
-	kindDD      *bubbledropdown.Dropdown
+	kindDD      *dropdownv2.Dropdown
 	kinds       []string
 	ddKinds     []string
 	newKindMode bool
+	keys        keymap.Form
+	huhForm     *huh.Form
+	huhVals     huhFields
 	// kindDDRow is the content-line index of the trigger within the form panel
 	// body; lastFormView is the most recent rendered panel. Both are set in
 	// View and consumed by ComposeDropdownOverlay.
@@ -75,14 +79,13 @@ type Model struct {
 }
 
 // fieldCount returns the total number of focusable items.
-// Indices: 0=kind, 1=name, 2=group, 3=tags, 4..4+len*2-1=fields, addField, body, save, cancel
+// Indices: 0=kind, 1=huh fields, 2..2+len*2-1=custom fields, addField, save, cancel
 func (m *Model) fieldCount() int {
-	return 4 + len(m.fields)*2 + 1 + 1 + 2
+	return 2 + len(m.fields)*2 + 1 + 2
 }
 
-func (m *Model) focusIdxAddField() int { return 4 + len(m.fields)*2 }
-func (m *Model) focusIdxBody() int     { return m.focusIdxAddField() + 1 }
-func (m *Model) focusIdxSave() int     { return m.focusIdxBody() + 1 }
+func (m *Model) focusIdxAddField() int { return 2 + len(m.fields)*2 }
+func (m *Model) focusIdxSave() int     { return m.focusIdxAddField() + 1 }
 func (m *Model) focusIdxCancel() int   { return m.focusIdxSave() + 1 }
 
 // NewModel creates a new form Model.
@@ -91,34 +94,16 @@ func NewModel(zm *zone.Manager) Model {
 	kind.Placeholder = "kind (e.g. rule, fact, instruction)"
 	kind.CharLimit = 100
 
-	name := textinput.New()
-	name.Placeholder = "name"
-	name.CharLimit = 200
-
-	group := textinput.New()
-	group.Placeholder = "group (optional, e.g. my-project)"
-	group.CharLimit = 100
-
-	tags := textinput.New()
-	tags.Placeholder = "tags (comma-separated)"
-	tags.CharLimit = 500
-
-	body := textinput.New()
-	body.Placeholder = "body / description"
-	body.CharLimit = 5000
-
 	m := Model{
 		kind:        kind,
-		name:        name,
-		group:       group,
-		tags:        tags,
-		body:        body,
 		zoneManager: zm,
+		keys:        keymap.DefaultForm,
 	}
 	// Start with an empty kind dropdown (only the sentinel); SetKinds rebuilds
 	// it with the real kind set whenever the form is opened.
-	m.kindDD = buildKindDropdown(zm, nil)
+	m.kindDD = kinddropdown.BuildForm(zm, nil)
 	m.setKind("")
+	m.clearHuhFields()
 	return m
 }
 
@@ -147,10 +132,7 @@ func (m *Model) GetMode() Mode { return m.mode }
 // PopulateFrom fills the form from an entry.
 func (m *Model) PopulateFrom(e entry.Entry) {
 	m.setKind(e.Kind)
-	m.name.SetValue(e.Name)
-	m.group.SetValue(e.Group)
-	m.tags.SetValue(strings.Join(e.Tags, ", "))
-	m.body.SetValue(e.Body)
+	m.syncHuhFromEntry(e)
 	m.sourceID = e.ID
 	m.sourceStatus = e.Status
 	m.sourceProposedBy = e.ProposedBy
@@ -181,10 +163,7 @@ func (m *Model) SetProposalID(id string) { m.proposalID = id }
 func (m *Model) Reset() {
 	m.kind.SetValue("")
 	m.newKindMode = false
-	m.name.SetValue("")
-	m.group.SetValue("")
-	m.tags.SetValue("")
-	m.body.SetValue("")
+	m.clearHuhFields()
 	m.fields = nil
 	m.sourceID = ""
 	m.sourceStatus = ""
@@ -201,9 +180,9 @@ func (m *Model) ToEntry() entry.Entry {
 	e := entry.Entry{
 		ID:         m.sourceID,
 		Kind:       m.selectedKind(),
-		Name:       strings.TrimSpace(m.name.Value()),
-		Group:      strings.TrimSpace(m.group.Value()),
-		Body:       strings.TrimSpace(m.body.Value()),
+		Name:       strings.TrimSpace(m.huhVals.name),
+		Group:      strings.TrimSpace(m.huhVals.group),
+		Body:       strings.TrimSpace(m.huhVals.body),
 		Delivery:   m.delivery,
 		Status:     m.sourceStatus,
 		ProposedBy: m.sourceProposedBy,
@@ -211,7 +190,7 @@ func (m *Model) ToEntry() entry.Entry {
 		TargetID:   m.sourceTargetID,
 	}
 
-	rawTags := strings.Split(m.tags.Value(), ",")
+	rawTags := strings.Split(m.huhVals.tags, ",")
 	e.Tags = []string{}
 	for _, t := range rawTags {
 		t = strings.TrimSpace(t)
@@ -236,6 +215,9 @@ func (m *Model) ToEntry() entry.Entry {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
+	if m.huhForm != nil {
+		m.rebuildHuhForm()
+	}
 }
 
 // Init returns the initial command.
@@ -251,9 +233,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	// Kind dropdown result messages: apply the choice / close the panel.
 	switch msg.(type) {
-	case bubbledropdown.ItemChosenMsg:
+	case dropdownv2.ItemChosenMsg:
 		return m.handleKindChosen(msg)
-	case bubbledropdown.ItemCanceledMsg:
+	case dropdownv2.ItemCanceledMsg:
 		if m.kindDD != nil {
 			m.kindDD, _ = m.kindDD.Update(msg)
 		}
@@ -264,28 +246,50 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	// While the Kind panel is open, route all key/mouse events to it.
 	if m.kindDD != nil && m.kindDD.Open() {
 		switch msg.(type) {
-		case tea.KeyMsg, tea.MouseMsg:
+		case tea.KeyPressMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseWheelMsg:
 			m.kindDD, cmd = m.kindDD.Update(msg)
 			return m, cmd
 		}
 	}
 
 	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch msg.String() {
-		case "ctrl+s":
+	case tea.WindowSizeMsg, tea.BackgroundColorMsg:
+		if m.huhForm != nil {
+			updated, huhCmd := m.huhForm.Update(msg)
+			if f, ok := updated.(*huh.Form); ok {
+				m.huhForm = f
+			}
+			return m, huhCmd
+		}
+	case editor.FinishedMsg:
+		if msg.Err == nil {
+			m.huhVals.body = msg.Body
+			m.rebuildHuhForm()
+		}
+		return m, nil
+	case tea.KeyPressMsg:
+		switch {
+		case key.Matches(msg, m.keys.Save):
 			e := m.ToEntry()
 			pid := m.proposalID
 			return m, func() tea.Msg { return SaveMsg{E: e, ProposalID: pid} }
-		case "esc":
+		case key.Matches(msg, m.keys.Cancel):
 			return m, func() tea.Msg { return CancelMsg{} }
-		case "tab":
+		case key.Matches(msg, m.keys.EditBody):
+			return m, editor.OpenBodyCmd(m.huhVals.body)
+		case key.Matches(msg, m.keys.Next):
 			m.focusIdx = (m.focusIdx + 1) % m.fieldCount()
 			m.applyFocus()
-		case "shift+tab":
+			if m.focusIdx == 1 && m.huhForm != nil {
+				return m, m.huhInitCmd()
+			}
+		case key.Matches(msg, m.keys.Prev):
 			m.focusIdx = (m.focusIdx - 1 + m.fieldCount()) % m.fieldCount()
 			m.applyFocus()
-		case "enter":
+			if m.focusIdx == 1 && m.huhForm != nil {
+				return m, m.huhInitCmd()
+			}
+		case key.Matches(msg, m.keys.Submit):
 			if m.focusIdx == m.focusIdxAddField() {
 				m.addField()
 			} else if m.focusIdx == m.focusIdxSave() {
@@ -301,24 +305,24 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m, cmd = m.updateFocusedField(msg)
 		}
 
-	case tea.MouseMsg:
+	case tea.MouseClickMsg:
 		// A click on the Kind trigger opens the dropdown (even from new-kind
 		// mode, so the user can switch back to an existing kind).
-		if m.kindDD != nil && m.zoneManager.Get(kindDDZone).InBounds(msg) {
+		if m.kindDD != nil && m.zoneManager.Get(zones.FormKindDD).InBounds(msg) {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 			return m, cmd
 		}
-		if m.zoneManager.Get("form:save").InBounds(msg) {
+		if m.zoneManager.Get(zones.FormSave).InBounds(msg) {
 			e := m.ToEntry()
 			pid := m.proposalID
 			return m, func() tea.Msg { return SaveMsg{E: e, ProposalID: pid} }
-		} else if m.zoneManager.Get("form:cancel").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.FormCancel).InBounds(msg) {
 			return m, func() tea.Msg { return CancelMsg{} }
-		} else if m.zoneManager.Get("form:add-field").InBounds(msg) {
+		} else if m.zoneManager.Get(zones.FormAddFld).InBounds(msg) {
 			m.addField()
 		} else {
 			for i := range m.fields {
-				if m.zoneManager.Get(removeFieldZone(i)).InBounds(msg) {
+				if m.zoneManager.Get(zones.FormRemoveField(i)).InBounds(msg) {
 					m.removeField(i)
 					break
 				}
@@ -330,7 +334,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 }
 
 // updateFocusedField routes the key message to the focused input.
-func (m Model) updateFocusedField(msg tea.KeyMsg) (Model, tea.Cmd) {
+func (m Model) updateFocusedField(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.focusIdx {
 	case 0:
@@ -343,13 +347,17 @@ func (m Model) updateFocusedField(msg tea.KeyMsg) (Model, tea.Cmd) {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 		}
 	case 1:
-		m.name, cmd = m.name.Update(msg)
-	case 2:
-		m.group, cmd = m.group.Update(msg)
-	case 3:
-		m.tags, cmd = m.tags.Update(msg)
+		m.rebuildHuhForm()
+		m.activateHuh()
+		if m.huhForm != nil {
+			updated, huhCmd := m.huhForm.Update(msg)
+			if f, ok := updated.(*huh.Form); ok {
+				m.huhForm = f
+			}
+			cmd = huhCmd
+		}
 	default:
-		fieldBase := 4
+		fieldBase := 2
 		for i := range m.fields {
 			keyIdx := fieldBase + i*2
 			valIdx := keyIdx + 1
@@ -361,9 +369,6 @@ func (m Model) updateFocusedField(msg tea.KeyMsg) (Model, tea.Cmd) {
 				m.fields[i].Val, cmd = m.fields[i].Val.Update(msg)
 				return m, cmd
 			}
-		}
-		if m.focusIdx == m.focusIdxBody() {
-			m.body, cmd = m.body.Update(msg)
 		}
 	}
 	return m, cmd
@@ -381,13 +386,10 @@ func (m *Model) applyFocus() {
 		}
 		m.syncKindFocus()
 	case 1:
-		m.name.Focus()
-	case 2:
-		m.group.Focus()
-	case 3:
-		m.tags.Focus()
+		m.rebuildHuhForm()
+		m.activateHuh()
 	default:
-		fieldBase := 4
+		fieldBase := 2
 		for i := range m.fields {
 			keyIdx := fieldBase + i*2
 			valIdx := keyIdx + 1
@@ -400,9 +402,6 @@ func (m *Model) applyFocus() {
 				return
 			}
 		}
-		if m.focusIdx == m.focusIdxBody() {
-			m.body.Focus()
-		}
 	}
 }
 
@@ -412,10 +411,6 @@ func (m *Model) blurAll() {
 		m.kindDD.SetFocused(false)
 	}
 	m.kind.Blur()
-	m.name.Blur()
-	m.group.Blur()
-	m.tags.Blur()
-	m.body.Blur()
 	for i := range m.fields {
 		m.fields[i].Key.Blur()
 		m.fields[i].Val.Blur()
@@ -433,7 +428,7 @@ func (m *Model) addField() {
 	vInput.CharLimit = 1000
 
 	m.fields = append(m.fields, FieldPair{Key: kInput, Val: vInput})
-	m.focusIdx = 4 + (len(m.fields)-1)*2
+	m.focusIdx = 2 + (len(m.fields)-1)*2
 	m.applyFocus()
 }
 
@@ -450,7 +445,15 @@ func (m *Model) removeField(i int) {
 	m.applyFocus()
 }
 
-// removeFieldZone returns the zone ID for removing a field.
-func removeFieldZone(i int) string {
-	return fmt.Sprintf("form:remove-field:%d", i)
+func (m *Model) huhInitCmd() tea.Cmd {
+	if m.huhForm == nil {
+		return nil
+	}
+	size := func() tea.Msg {
+		return tea.WindowSizeMsg{Width: m.width, Height: m.height}
+	}
+	if m.width == 0 {
+		return m.huhForm.Init()
+	}
+	return tea.Sequence(m.huhForm.Init(), size)
 }

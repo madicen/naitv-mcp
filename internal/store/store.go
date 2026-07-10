@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -57,7 +58,11 @@ END;
 
 // Store wraps a SQLite database for single-goroutine use.
 type Store struct {
-	db *sql.DB
+	db     *sql.DB
+	dbPath string
+
+	onChangeMu sync.Mutex
+	onChange   []func()
 }
 
 // DefaultDBPath returns ~/.config/naitv-mcp/context.db, or the value of
@@ -86,53 +91,93 @@ func Open(dbPath string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("store: apply schema: %w", err)
 	}
-	if err := migrate(db); err != nil {
+	if err := runMigrations(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("store: migrate: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, dbPath: dbPath}, nil
 }
 
-// migrate applies additive schema changes to databases created before a column
-// existed. CREATE TABLE IF NOT EXISTS leaves older tables untouched, so new
-// columns are added here.
-func migrate(db *sql.DB) error {
-	if !hasColumn(db, "entries", "delivery") {
-		if _, err := db.Exec(`ALTER TABLE entries ADD COLUMN delivery TEXT NOT NULL DEFAULT 'init'`); err != nil {
-			return fmt.Errorf("add delivery column: %w", err)
-		}
-	}
-	if !hasColumn(db, "entries", "grp") {
-		if _, err := db.Exec(`ALTER TABLE entries ADD COLUMN grp TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("add grp column: %w", err)
-		}
-	}
-	return nil
+// DBPath returns the filesystem path of the SQLite database.
+func (s *Store) DBPath() string {
+	return s.dbPath
 }
 
-// hasColumn reports whether the given table already has the named column.
-func hasColumn(db *sql.DB, table, column string) bool {
-	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+// ModTime returns the last modification time of the database file.
+func (s *Store) ModTime() (time.Time, error) {
+	if s.dbPath == "" {
+		return time.Time{}, nil
+	}
+	info, err := os.Stat(s.dbPath)
 	if err != nil {
-		return false
+		return time.Time{}, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var (
-			cid       int
-			name, typ string
-			notNull   int
-			dflt      sql.NullString
-			pk        int
-		)
-		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
-			return false
-		}
-		if name == column {
-			return true
-		}
+	return info.ModTime(), nil
+}
+
+// OnChange registers fn to be called after mutating store operations.
+func (s *Store) OnChange(fn func()) {
+	s.onChangeMu.Lock()
+	defer s.onChangeMu.Unlock()
+	s.onChange = append(s.onChange, fn)
+}
+
+func (s *Store) notifyChange() {
+	s.onChangeMu.Lock()
+	fns := append([]func(){}, s.onChange...)
+	s.onChangeMu.Unlock()
+	for _, fn := range fns {
+		fn()
 	}
-	return false
+}
+
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+const insertEntrySQL = `INSERT INTO entries (id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+func insertEntry(db execer, e entry.Entry, status string, proposedAt *time.Time) error {
+	tagsJSON, err := marshalTags(e.Tags)
+	if err != nil {
+		return err
+	}
+	fieldsJSON, err := marshalFields(e.Fields)
+	if err != nil {
+		return err
+	}
+	var proposedAtArg interface{}
+	if proposedAt != nil {
+		proposedAtArg = proposedAt.UTC()
+	}
+	_, err = db.Exec(
+		insertEntrySQL,
+		e.ID, e.Kind, e.Name, e.Group, e.Body,
+		tagsJSON, fieldsJSON,
+		status, string(e.DeliveryOrDefault()),
+		e.ProposedBy, proposedAtArg, e.TargetID,
+		e.CreatedAt, e.UpdatedAt,
+	)
+	return err
+}
+
+func (s *Store) activeNameExists(name, excludeID string) (bool, error) {
+	query := `SELECT 1 FROM entries WHERE status = 'active' AND name = ?`
+	args := []any{name}
+	if excludeID != "" {
+		query += ` AND id != ?`
+		args = append(args, excludeID)
+	}
+	var one int
+	err := s.db.QueryRow(query, args...).Scan(&one)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Close closes the underlying database connection.
@@ -146,21 +191,27 @@ func newID() string {
 }
 
 // marshalTags encodes a []string as JSON.
-func marshalTags(tags []string) string {
+func marshalTags(tags []string) (string, error) {
 	if tags == nil {
 		tags = []string{}
 	}
-	b, _ := json.Marshal(tags)
-	return string(b)
+	b, err := json.Marshal(tags)
+	if err != nil {
+		return "", fmt.Errorf("marshal tags: %w", err)
+	}
+	return string(b), nil
 }
 
 // marshalFields encodes a map[string]string as JSON.
-func marshalFields(fields map[string]string) string {
+func marshalFields(fields map[string]string) (string, error) {
 	if fields == nil {
 		fields = map[string]string{}
 	}
-	b, _ := json.Marshal(fields)
-	return string(b)
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return "", fmt.Errorf("marshal fields: %w", err)
+	}
+	return string(b), nil
 }
 
 // scanEntry reads a row produced by selectCols into an Entry.
@@ -169,7 +220,7 @@ func scanEntry(row interface {
 }) (entry.Entry, error) {
 	var e entry.Entry
 	var tagsJSON, fieldsJSON string
-	var proposedAt sql.NullTime
+	var proposedAt, lastAccessed sql.NullTime
 	var status, delivery string
 
 	err := row.Scan(
@@ -178,6 +229,7 @@ func scanEntry(row interface {
 		&status, &delivery,
 		&e.ProposedBy, &proposedAt, &e.TargetID,
 		&e.CreatedAt, &e.UpdatedAt,
+		&e.AccessCount, &lastAccessed,
 	)
 	if err != nil {
 		return entry.Entry{}, err
@@ -204,11 +256,17 @@ func scanEntry(row interface {
 		t := proposedAt.Time
 		e.ProposedAt = &t
 	}
+	if lastAccessed.Valid {
+		t := lastAccessed.Time
+		e.LastAccessedAt = &t
+	}
 
 	return e, nil
 }
 
-const selectCols = `SELECT id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at FROM entries`
+const selectCols = `SELECT id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at, access_count, last_accessed_at FROM entries`
+
+const selectColsNoPrefix = `e.id, e.kind, e.name, e.grp, e.body, e.tags, e.fields, e.status, e.delivery, e.proposed_by, e.proposed_at, e.target_id, e.created_at, e.updated_at, e.access_count, e.last_accessed_at`
 
 // List returns active entries, optionally filtered by kind and/or tags.
 // An empty kind means "all kinds". Tags is an AND filter.
@@ -219,6 +277,10 @@ func (s *Store) List(kind string, tags []string) ([]entry.Entry, error) {
 	if kind != "" {
 		query += ` AND kind = ?`
 		args = append(args, kind)
+	}
+	for _, tag := range tags {
+		query += ` AND EXISTS (SELECT 1 FROM json_each(entries.tags) WHERE json_each.value = ?)`
+		args = append(args, tag)
 	}
 
 	rows, err := s.db.Query(query, args...)
@@ -233,31 +295,12 @@ func (s *Store) List(kind string, tags []string) ([]entry.Entry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("store: list scan: %w", err)
 		}
-		if matchesTags(e.Tags, tags) {
-			results = append(results, e)
-		}
+		results = append(results, e)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: list rows: %w", err)
 	}
 	return results, nil
-}
-
-// matchesTags returns true if entryTags contains all of required.
-func matchesTags(entryTags, required []string) bool {
-	if len(required) == 0 {
-		return true
-	}
-	set := make(map[string]struct{}, len(entryTags))
-	for _, t := range entryTags {
-		set[t] = struct{}{}
-	}
-	for _, r := range required {
-		if _, ok := set[r]; !ok {
-			return false
-		}
-	}
-	return true
 }
 
 // Get retrieves an entry by ID (any status).
@@ -289,8 +332,7 @@ func (s *Store) GetByName(name string) (entry.Entry, error) {
 // Search performs a full-text search over active entries.
 func (s *Store) Search(query string) ([]entry.Entry, error) {
 	q := `
-		SELECT e.id, e.kind, e.name, e.grp, e.body, e.tags, e.fields, e.status, e.delivery,
-		       e.proposed_by, e.proposed_at, e.target_id, e.created_at, e.updated_at
+		SELECT ` + selectColsNoPrefix + `
 		FROM entries_fts
 		JOIN entries e ON entries_fts.rowid = e.rowid
 		WHERE entries_fts MATCH ?
@@ -319,6 +361,14 @@ func (s *Store) Search(query string) ([]entry.Entry, error) {
 
 // Create inserts a new active entry, generating a ULID id and timestamps.
 func (s *Store) Create(e entry.Entry) (entry.Entry, error) {
+	exists, err := s.activeNameExists(e.Name, "")
+	if err != nil {
+		return entry.Entry{}, fmt.Errorf("store: create: %w", err)
+	}
+	if exists {
+		return entry.Entry{}, ErrNameConflict
+	}
+
 	now := time.Now().UTC()
 	e.ID = newID()
 	e.Status = entry.StatusActive
@@ -327,23 +377,33 @@ func (s *Store) Create(e entry.Entry) (entry.Entry, error) {
 	e.UpdatedAt = now
 	e.ProposedAt = nil
 
-	_, err := s.db.Exec(
-		`INSERT INTO entries (id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.Kind, e.Name, e.Group, e.Body,
-		marshalTags(e.Tags), marshalFields(e.Fields),
-		string(e.Status), string(e.Delivery),
-		e.ProposedBy, nil, e.TargetID,
-		e.CreatedAt, e.UpdatedAt,
-	)
-	if err != nil {
+	if err := insertEntry(s.db, e, string(e.Status), nil); err != nil {
 		return entry.Entry{}, fmt.Errorf("store: create: %w", err)
 	}
+	s.notifyChange()
 	return e, nil
 }
 
 // Update saves changes to an existing entry, updating updated_at.
 func (s *Store) Update(e entry.Entry) (entry.Entry, error) {
+	if e.Status == entry.StatusActive {
+		exists, err := s.activeNameExists(e.Name, e.ID)
+		if err != nil {
+			return entry.Entry{}, fmt.Errorf("store: update: %w", err)
+		}
+		if exists {
+			return entry.Entry{}, ErrNameConflict
+		}
+	}
+
+	before, err := s.Get(e.ID)
+	if err != nil {
+		return entry.Entry{}, fmt.Errorf("store: update: %w", err)
+	}
+	if err := s.recordHistory(before, "update", ""); err != nil {
+		return entry.Entry{}, err
+	}
+
 	e.UpdatedAt = time.Now().UTC()
 
 	var proposedAt interface{}
@@ -351,10 +411,19 @@ func (s *Store) Update(e entry.Entry) (entry.Entry, error) {
 		proposedAt = e.ProposedAt.UTC()
 	}
 
+	tagsJSON, err := marshalTags(e.Tags)
+	if err != nil {
+		return entry.Entry{}, err
+	}
+	fieldsJSON, err := marshalFields(e.Fields)
+	if err != nil {
+		return entry.Entry{}, err
+	}
+
 	res, err := s.db.Exec(
 		`UPDATE entries SET kind=?, name=?, grp=?, body=?, tags=?, fields=?, status=?, delivery=?, proposed_by=?, proposed_at=?, target_id=?, updated_at=? WHERE id=?`,
 		e.Kind, e.Name, e.Group, e.Body,
-		marshalTags(e.Tags), marshalFields(e.Fields),
+		tagsJSON, fieldsJSON,
 		string(e.Status), string(e.DeliveryOrDefault()),
 		e.ProposedBy, proposedAt, e.TargetID,
 		e.UpdatedAt, e.ID,
@@ -366,6 +435,7 @@ func (s *Store) Update(e entry.Entry) (entry.Entry, error) {
 	if n == 0 {
 		return entry.Entry{}, fmt.Errorf("store: update: not found: %s", e.ID)
 	}
+	s.notifyChange()
 	return e, nil
 }
 
@@ -375,6 +445,14 @@ func (s *Store) SetDelivery(id string, d entry.Delivery) error {
 	if d == "" {
 		d = entry.DeliveryInit
 	}
+	before, err := s.Get(id)
+	if err != nil {
+		return fmt.Errorf("store: set delivery: %w", err)
+	}
+	if err := s.recordHistory(before, "set_delivery", ""); err != nil {
+		return err
+	}
+
 	res, err := s.db.Exec(
 		`UPDATE entries SET delivery=?, updated_at=? WHERE id=?`,
 		string(d), time.Now().UTC(), id,
@@ -386,12 +464,24 @@ func (s *Store) SetDelivery(id string, d entry.Delivery) error {
 	if n == 0 {
 		return fmt.Errorf("store: set delivery: not found: %s", id)
 	}
+	s.notifyChange()
 	return nil
 }
 
-// Delete removes an entry by ID.
+// Delete archives an entry by ID (soft delete).
 func (s *Store) Delete(id string) error {
-	res, err := s.db.Exec(`DELETE FROM entries WHERE id = ?`, id)
+	e, err := s.Get(id)
+	if err != nil {
+		return fmt.Errorf("store: delete: %w", err)
+	}
+	if err := s.recordHistory(e, "delete", ""); err != nil {
+		return err
+	}
+
+	res, err := s.db.Exec(
+		`UPDATE entries SET status='archived', updated_at=? WHERE id=?`,
+		time.Now().UTC(), id,
+	)
 	if err != nil {
 		return fmt.Errorf("store: delete: %w", err)
 	}
@@ -399,6 +489,22 @@ func (s *Store) Delete(id string) error {
 	if n == 0 {
 		return fmt.Errorf("store: delete: not found: %s", id)
 	}
+	s.notifyChange()
+	return nil
+}
+
+// Purge permanently removes an entry by ID.
+func (s *Store) Purge(id string) error {
+	res, err := s.db.Exec(`DELETE FROM entries WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("store: purge: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("store: purge: not found: %s", id)
+	}
+	_, _ = s.db.Exec(`DELETE FROM entry_history WHERE entry_id = ?`, id)
+	s.notifyChange()
 	return nil
 }
 
@@ -412,18 +518,10 @@ func (s *Store) CreatePending(e entry.Entry) (entry.Entry, error) {
 	e.UpdatedAt = now
 	e.ProposedAt = &now
 
-	_, err := s.db.Exec(
-		`INSERT INTO entries (id, kind, name, grp, body, tags, fields, status, delivery, proposed_by, proposed_at, target_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		e.ID, e.Kind, e.Name, e.Group, e.Body,
-		marshalTags(e.Tags), marshalFields(e.Fields),
-		string(e.Status), string(e.Delivery),
-		e.ProposedBy, e.ProposedAt, e.TargetID,
-		e.CreatedAt, e.UpdatedAt,
-	)
-	if err != nil {
+	if err := insertEntry(s.db, e, string(e.Status), e.ProposedAt); err != nil {
 		return entry.Entry{}, fmt.Errorf("store: create pending: %w", err)
 	}
+	s.notifyChange()
 	return e, nil
 }
 
@@ -463,7 +561,26 @@ func (s *Store) PendingCount() (int, error) {
 // If target_id == "": creates a new active entry from proposal fields.
 // If target_id != "": merges non-empty proposal fields into the target entry, then deletes proposal.
 func (s *Store) Approve(proposalID string) (entry.Entry, error) {
-	proposal, err := s.Get(proposalID)
+	e, err := s.approve(s.db, proposalID)
+	if err != nil {
+		return entry.Entry{}, err
+	}
+	s.notifyChange()
+	return e, nil
+}
+
+func (s *Store) approve(db execer, proposalID string) (entry.Entry, error) {
+	getter, ok := db.(interface {
+		QueryRow(query string, args ...any) *sql.Row
+	})
+	if !ok {
+		return entry.Entry{}, fmt.Errorf("store: approve: unsupported executor")
+	}
+
+	proposal, err := scanEntry(getter.QueryRow(selectCols+` WHERE id = ?`, proposalID))
+	if err == sql.ErrNoRows {
+		return entry.Entry{}, fmt.Errorf("store: approve: not found: %s", proposalID)
+	}
 	if err != nil {
 		return entry.Entry{}, fmt.Errorf("store: approve: %w", err)
 	}
@@ -472,13 +589,16 @@ func (s *Store) Approve(proposalID string) (entry.Entry, error) {
 	}
 
 	if proposal.TargetID == "" {
-		// Create new active entry from proposal fields.
-		proposal.Status = entry.StatusActive
-		proposal.ProposedAt = nil
-		now := time.Now().UTC()
-		proposal.UpdatedAt = now
+		exists, err := s.activeNameExists(proposal.Name, proposalID)
+		if err != nil {
+			return entry.Entry{}, fmt.Errorf("store: approve: %w", err)
+		}
+		if exists {
+			return entry.Entry{}, ErrNameConflict
+		}
 
-		res, err := s.db.Exec(
+		now := time.Now().UTC()
+		res, err := db.Exec(
 			`UPDATE entries SET status='active', proposed_at=NULL, updated_at=? WHERE id=?`,
 			now, proposalID,
 		)
@@ -489,17 +609,21 @@ func (s *Store) Approve(proposalID string) (entry.Entry, error) {
 		if n == 0 {
 			return entry.Entry{}, fmt.Errorf("store: approve: proposal not found")
 		}
+		proposal.Status = entry.StatusActive
+		proposal.ProposedAt = nil
 		proposal.UpdatedAt = now
 		return proposal, nil
 	}
 
-	// Merge into existing target.
-	target, err := s.Get(proposal.TargetID)
+	target, err := scanEntry(getter.QueryRow(selectCols+` WHERE id = ?`, proposal.TargetID))
 	if err != nil {
 		return entry.Entry{}, fmt.Errorf("store: approve: target: %w", err)
 	}
 
-	// Merge non-empty fields from proposal into target.
+	if err := s.recordHistory(target, "approve", ""); err != nil {
+		return entry.Entry{}, err
+	}
+
 	if proposal.Name != "" {
 		target.Name = proposal.Name
 	}
@@ -526,16 +650,34 @@ func (s *Store) Approve(proposalID string) (entry.Entry, error) {
 		}
 	}
 
-	updated, err := s.Update(target)
+	target.UpdatedAt = time.Now().UTC()
+	tagsJSON, err := marshalTags(target.Tags)
+	if err != nil {
+		return entry.Entry{}, err
+	}
+	fieldsJSON, err := marshalFields(target.Fields)
+	if err != nil {
+		return entry.Entry{}, err
+	}
+
+	res, err := db.Exec(
+		`UPDATE entries SET kind=?, name=?, grp=?, body=?, tags=?, fields=?, updated_at=? WHERE id=?`,
+		target.Kind, target.Name, target.Group, target.Body,
+		tagsJSON, fieldsJSON, target.UpdatedAt, target.ID,
+	)
 	if err != nil {
 		return entry.Entry{}, fmt.Errorf("store: approve: update target: %w", err)
 	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return entry.Entry{}, fmt.Errorf("store: approve: target not found")
+	}
 
-	if err := s.Delete(proposalID); err != nil {
+	if _, err := db.Exec(`DELETE FROM entries WHERE id = ?`, proposalID); err != nil {
 		return entry.Entry{}, fmt.Errorf("store: approve: delete proposal: %w", err)
 	}
 
-	return updated, nil
+	return target, nil
 }
 
 // Reject deletes a pending proposal without applying it.
@@ -547,26 +689,37 @@ func (s *Store) Reject(proposalID string) error {
 	if proposal.Status != entry.StatusPending {
 		return fmt.Errorf("store: reject: entry %s is not pending", proposalID)
 	}
-	if err := s.Delete(proposalID); err != nil {
+	if err := s.Purge(proposalID); err != nil {
 		return fmt.Errorf("store: reject: %w", err)
 	}
 	return nil
 }
 
-// ApproveAll approves every pending proposal.
+// ApproveAll approves every pending proposal in a single transaction.
 func (s *Store) ApproveAll() ([]entry.Entry, error) {
 	pending, err := s.ListPending()
 	if err != nil {
 		return nil, fmt.Errorf("store: approve all: %w", err)
 	}
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("store: approve all begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	var results []entry.Entry
 	for _, p := range pending {
-		approved, err := s.Approve(p.ID)
+		approved, err := s.approve(tx, p.ID)
 		if err != nil {
 			return results, fmt.Errorf("store: approve all: %w", err)
 		}
 		results = append(results, approved)
 	}
+
+	if err := tx.Commit(); err != nil {
+		return results, fmt.Errorf("store: approve all commit: %w", err)
+	}
+	s.notifyChange()
 	return results, nil
 }

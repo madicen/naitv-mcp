@@ -3,8 +3,8 @@ package review
 import (
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	zone "github.com/lrstanley/bubblezone"
+	"charm.land/lipgloss/v2"
+	zone "github.com/lrstanley/bubblezone/v2"
 )
 
 // TestViewFitsHeight guards against the regression where the review panes were
