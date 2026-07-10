@@ -23,7 +23,7 @@ func TestValidateManifest_RequiresVersion(t *testing.T) {
 	}
 }
 
-func TestEntryIDs_FromJSONAndNames(t *testing.T) {
+func TestEntryIDs_FromJSON(t *testing.T) {
 	st, err := store.Open(t.TempDir() + "/test.db")
 	if err != nil {
 		t.Fatal(err)
@@ -37,8 +37,40 @@ func TestEntryIDs_FromJSONAndNames(t *testing.T) {
 	if len(fromJSON) != 1 || fromJSON[0] != created.ID {
 		t.Fatalf("entry_ids = %#v", fromJSON)
 	}
-	fromNames := EntryIDs(st, entry.Entry{Fields: map[string]string{"entry_names": "linked, missing"}})
-	if len(fromNames) != 1 || fromNames[0] != created.ID {
-		t.Fatalf("entry_names = %#v", fromNames)
+}
+
+func TestEntryIDs_MigratesLegacyNames(t *testing.T) {
+	st, err := store.Open(t.TempDir() + "/test.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	created, err := st.Create(entry.Entry{Kind: "rule", Name: "legacy-link", Body: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	track, err := st.Create(entry.Entry{
+		Kind: "plugin",
+		Name: "legacy-plugin",
+		Fields: map[string]string{
+			"entry_names": "legacy-link, missing",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := EntryIDs(st, track)
+	if len(ids) != 1 || ids[0] != created.ID {
+		t.Fatalf("migrated ids = %#v", ids)
+	}
+	got, err := st.Get(track.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Fields["entry_names"] != "" {
+		t.Fatalf("expected entry_names removed, got %#v", got.Fields)
+	}
+	if got.Fields["entry_ids"] == "" {
+		t.Fatal("expected entry_ids written during migration")
 	}
 }

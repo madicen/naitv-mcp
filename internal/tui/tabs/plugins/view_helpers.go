@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -131,15 +132,14 @@ func formatInstalledDetail(e entry.Entry) string {
 		}
 	}
 
-	// List the entry names stored in entry_names field.
-	if names := e.Fields["entry_names"]; names != "" {
-		sb.WriteString("\nProposed entries:\n")
-		for _, n := range strings.Split(names, ",") {
-			n = strings.TrimSpace(n)
-			if n == "" {
-				continue
+	// List linked entry IDs from the tracker.
+	if raw := e.Fields["entry_ids"]; raw != "" {
+		var ids []string
+		if err := json.Unmarshal([]byte(raw), &ids); err == nil && len(ids) > 0 {
+			sb.WriteString("\nLinked entries:\n")
+			for _, id := range ids {
+				fmt.Fprintf(&sb, "  %s\n", id)
 			}
-			fmt.Fprintf(&sb, "  %s\n", n)
 		}
 	}
 

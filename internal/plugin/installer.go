@@ -84,7 +84,6 @@ func Install(st *store.Store, source string) (*InstallResult, error) {
 	}
 
 	idsJSON, _ := json.Marshal(entryIDs)
-	allNames := append(result.Proposed, result.Skipped...)
 	_, _ = st.Create(entry.Entry{
 		Kind:  "plugin",
 		Name:  m.Name,
@@ -95,7 +94,6 @@ func Install(st *store.Store, source string) (*InstallResult, error) {
 			"source":      resolvedSource,
 			"author":      m.Author,
 			"entry_count": fmt.Sprintf("%d", len(m.Entries)),
-			"entry_names": strings.Join(allNames, ","),
 			"entry_ids":   string(idsJSON),
 		},
 	})
@@ -118,45 +116,17 @@ func Uninstall(st *store.Store, name string) (*UninstallResult, error) {
 	entryIDs := EntryIDs(st, *track)
 	result := &UninstallResult{Name: name}
 
-	if len(entryIDs) > 0 {
-		for _, id := range entryIDs {
-			e, err := st.Get(id)
-			if err != nil {
-				result.Missing = append(result.Missing, id)
-				continue
-			}
-			if err := st.Delete(id); err != nil {
-				result.Missing = append(result.Missing, e.Name)
-				continue
-			}
-			result.Removed = append(result.Removed, e.Name)
+	for _, id := range entryIDs {
+		e, err := st.Get(id)
+		if err != nil {
+			result.Missing = append(result.Missing, id)
+			continue
 		}
-	} else {
-		active, _ := st.List("", nil)
-		pending, _ := st.ListPending()
-		nameToID := make(map[string]string, len(active)+len(pending))
-		for _, e := range active {
-			nameToID[e.Name] = e.ID
+		if err := st.Delete(id); err != nil {
+			result.Missing = append(result.Missing, e.Name)
+			continue
 		}
-		for _, e := range pending {
-			nameToID[e.Name] = e.ID
-		}
-		for _, n := range strings.Split(track.Fields["entry_names"], ",") {
-			n = strings.TrimSpace(n)
-			if n == "" {
-				continue
-			}
-			id, ok := nameToID[n]
-			if !ok {
-				result.Missing = append(result.Missing, n)
-				continue
-			}
-			if err := st.Delete(id); err != nil {
-				result.Missing = append(result.Missing, n)
-				continue
-			}
-			result.Removed = append(result.Removed, n)
-		}
+		result.Removed = append(result.Removed, e.Name)
 	}
 	_ = st.Delete(track.ID)
 	return result, nil
@@ -174,11 +144,20 @@ func parseEntryIDs(track entry.Entry) []string {
 	return ids
 }
 
+// EntryIDs returns linked entry IDs for a plugin tracker. Legacy trackers that
+// only stored entry_names are migrated opportunistically on read.
 func EntryIDs(st *store.Store, track entry.Entry) []string {
 	if ids := parseEntryIDs(track); len(ids) > 0 {
 		return ids
 	}
-	var ids []string
+	return migrateLegacyEntryNames(st, track)
+}
+
+func migrateLegacyEntryNames(st *store.Store, track entry.Entry) []string {
+	raw := track.Fields["entry_names"]
+	if raw == "" {
+		return nil
+	}
 	active, _ := st.List("", nil)
 	pending, _ := st.ListPending()
 	nameToID := make(map[string]string, len(active)+len(pending))
@@ -188,7 +167,8 @@ func EntryIDs(st *store.Store, track entry.Entry) []string {
 	for _, e := range pending {
 		nameToID[e.Name] = e.ID
 	}
-	for _, n := range strings.Split(track.Fields["entry_names"], ",") {
+	var ids []string
+	for _, n := range strings.Split(raw, ",") {
 		n = strings.TrimSpace(n)
 		if n == "" {
 			continue
@@ -196,6 +176,14 @@ func EntryIDs(st *store.Store, track entry.Entry) []string {
 		if id, ok := nameToID[n]; ok {
 			ids = append(ids, id)
 		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	if b, err := json.Marshal(ids); err == nil {
+		track.Fields["entry_ids"] = string(b)
+		delete(track.Fields, "entry_names")
+		_, _ = st.Update(track)
 	}
 	return ids
 }
