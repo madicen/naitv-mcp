@@ -7,8 +7,10 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -252,7 +254,7 @@ func (m Model) View() string {
 	bottom := m.renderBottom()
 
 	divider := styleDiv.Render(strings.Repeat("│\n", m.contentH()))
-	body := joinHorizontal(left, divider, right)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
 	return body + "\n" + bottom
 }
 
@@ -260,14 +262,9 @@ func (m Model) View() string {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	vpW := m.detailW() - 2 // inside rounded border
-	if vpW < 1 {
-		vpW = 1
-	}
-	vpH := m.contentH() - 2
-	if vpH < 1 {
-		vpH = 1
-	}
+	_, detailW := layout.SplitWidths(w)
+	contentH := layout.ContentHeight(h, layout.PluginsFooterRows+2)
+	vpW, vpH := layout.ViewportSize(detailW, contentH)
 	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	m.updateViewport()
 }
@@ -309,47 +306,18 @@ func (m *Model) updateViewport() {
 	m.viewport.SetContent(m.detailContent())
 }
 
-func (m *Model) listW() int  { return m.width * 35 / 100 }
-func (m *Model) detailW() int { return m.width - m.listW() - 1 }
+func (m *Model) listW() int {
+	w, _ := layout.SplitWidths(m.width)
+	return w
+}
+func (m *Model) detailW() int {
+	_, w := layout.SplitWidths(m.width)
+	return w
+}
 func (m *Model) contentH() int {
-	h := m.height - 4 // tab bar (1) + mode bar (1) + bottom bar (2)
-	if h < 1 {
-		return 1
-	}
-	return h
+	return layout.ContentHeight(m.height, layout.PluginsFooterRows+2)
 }
 
 // ReloadInstalledMsg is emitted by the plugins tab to ask the root model to
 // call LoadPluginsCmd(st). It is exported so the root can type-switch on it.
 type ReloadInstalledMsg struct{}
-
-// joinHorizontal joins strings side by side, line by line.
-func joinHorizontal(parts ...string) string {
-	splitAll := make([][]string, len(parts))
-	maxLines := 0
-	for i, p := range parts {
-		lines := strings.Split(p, "\n")
-		splitAll[i] = lines
-		if len(lines) > maxLines {
-			maxLines = len(lines)
-		}
-	}
-	rows := make([]string, maxLines)
-	for r := 0; r < maxLines; r++ {
-		var sb strings.Builder
-		for i, lines := range splitAll {
-			if r < len(lines) {
-				sb.WriteString(lines[r])
-			} else if i < len(splitAll)-1 {
-				// Pad missing lines to keep columns aligned.
-				var wid int
-				if len(lines) > 0 {
-					wid = len([]rune(lines[0]))
-				}
-				sb.WriteString(strings.Repeat(" ", wid))
-			}
-		}
-		rows[r] = sb.String()
-	}
-	return strings.Join(rows, "\n")
-}

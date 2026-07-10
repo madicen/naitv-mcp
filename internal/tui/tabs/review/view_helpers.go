@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
 )
 
 var (
@@ -30,13 +31,8 @@ func (m *Model) View() string {
 
 // renderReviewSplit renders the left/right split pane.
 func renderReviewSplit(m *Model) string {
-	listW := m.width * 35 / 100
-	detailW := m.width - listW - 1
-
-	contentH := m.height - 3
-	if contentH < 1 {
-		contentH = 1
-	}
+	listW, detailW := layout.SplitWidths(m.width)
+	contentH := layout.ContentHeight(m.height, layout.ReviewFooterRows+2)
 
 	leftPane := renderProposalList(m, listW, contentH)
 	rightPane := renderProposalDetail(m, detailW, contentH)
@@ -46,14 +42,7 @@ func renderReviewSplit(m *Model) string {
 
 // renderProposalList renders the proposal list in the left pane.
 func renderProposalList(m *Model, width, height int) string {
-	innerW := width - 2
-	if innerW < 1 {
-		innerW = 1
-	}
-	innerH := height - 2
-	if innerH < 1 {
-		innerH = 1
-	}
+	innerW, innerH := layout.ViewportSize(width, height)
 
 	var rows []string
 	for i, p := range m.proposals {
@@ -68,10 +57,7 @@ func renderProposalList(m *Model, width, height int) string {
 		if maxName < 1 {
 			maxName = 1
 		}
-		if len([]rune(name)) > maxName {
-			runes := []rune(name)
-			name = string(runes[:maxName-1]) + "…"
-		}
+		name = layout.Truncate(name, maxName)
 
 		prefix := "  "
 		if i == m.selectedIdx {
@@ -111,14 +97,7 @@ func renderProposalList(m *Model, width, height int) string {
 
 // renderProposalDetail renders the selected proposal detail in the right pane.
 func renderProposalDetail(m *Model, width, height int) string {
-	innerW := width - 2
-	if innerW < 1 {
-		innerW = 1
-	}
-	innerH := height - 2
-	if innerH < 1 {
-		innerH = 1
-	}
+	innerW, innerH := layout.ViewportSize(width, height)
 
 	content := m.viewport.View()
 

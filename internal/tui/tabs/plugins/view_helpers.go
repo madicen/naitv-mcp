@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -77,7 +78,7 @@ func (m *Model) renderList() string {
 func renderInstalledRow(e entry.Entry, selected bool, w int) string {
 	ver := e.Fields["version"]
 	cnt := e.Fields["entry_count"]
-	line := fmt.Sprintf("%-22s v%-8s %s entries", truncate(e.Name, 22), ver, cnt)
+	line := fmt.Sprintf("%-22s v%-8s %s entries", layout.Truncate(e.Name, 22), ver, cnt)
 	if selected {
 		return styleSelected.Render("▶ " + line)
 	}
@@ -90,7 +91,7 @@ func renderAvailableRow(re plugin.RegistryEntry, selected bool, w int, installed
 	if installed {
 		badge = styleBadge.Render(" ✓")
 	}
-	line := truncate(re.Name, 24) + badge
+	line := layout.Truncate(re.Name, 24) + badge
 	if selected {
 		return styleSelected.Render("▶ " + line)
 	}
@@ -217,15 +218,6 @@ func (m *Model) renderBottom() string {
 		statusLine = "\n" + styleStatus.Render(m.status)
 	}
 	return hintLine + statusLine
-}
-
-// truncate shortens s to max runes, appending … if needed.
-func truncate(s string, max int) string {
-	runes := []rune(s)
-	if len(runes) <= max {
-		return s
-	}
-	return string(runes[:max-1]) + "…"
 }
 
 // wordWrap breaks s into lines no longer than width runes.

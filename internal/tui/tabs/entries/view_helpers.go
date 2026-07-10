@@ -6,6 +6,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -77,13 +78,8 @@ func renderKindFilter(m *Model) string {
 
 // renderSplit renders the left+right split pane.
 func renderSplit(m *Model) string {
-	listW := m.width * 35 / 100
-	detailW := m.width - listW - 1
-
-	contentH := m.height - 4
-	if contentH < 1 {
-		contentH = 1
-	}
+	listW, detailW := layout.SplitWidths(m.width)
+	contentH := layout.ContentHeight(m.height, layout.EntriesFooterRows+2)
 
 	leftPane := renderList(m, listW, contentH)
 	rightPane := renderDetail(m, detailW, contentH)
@@ -94,14 +90,7 @@ func renderSplit(m *Model) string {
 // renderList renders the flat entry list (with optional group headers) in the
 // left pane.
 func renderList(m *Model, width, height int) string {
-	innerW := width - 2
-	if innerW < 1 {
-		innerW = 1
-	}
-	innerH := height - 2
-	if innerH < 1 {
-		innerH = 1
-	}
+	innerW, innerH := layout.ViewportSize(width, height)
 
 	// Groups are active when the first flat item is a header.
 	hasGroups := len(m.flatItems) > 0 && m.flatItems[0].kind == itemKindHeader
@@ -154,9 +143,7 @@ func renderGroupHeader(m *Model, item listItem, selected bool, width int) string
 	if textW < 1 {
 		textW = 1
 	}
-	if len([]rune(label)) > textW {
-		label = string([]rune(label)[:textW-1]) + "…"
-	}
+	label = layout.Truncate(label, textW)
 
 	if selected {
 		return "  " + styleGroupHeaderSel.Render(chevron+" "+label) + " " + count
@@ -184,9 +171,7 @@ func renderEntryRow(e entry.Entry, selected bool, width int, indented bool) stri
 	}
 	label := e.Name
 	line := badge + label
-	if len([]rune(line)) > textW {
-		line = string([]rune(line)[:textW-1]) + "…"
-	}
+	line = layout.Truncate(line, textW)
 
 	glyph := deliveryGlyph(e)
 
@@ -198,14 +183,7 @@ func renderEntryRow(e entry.Entry, selected bool, width int, indented bool) stri
 
 // renderDetail renders the selected entry detail in the right pane.
 func renderDetail(m *Model, width, height int) string {
-	innerW := width - 2
-	if innerW < 1 {
-		innerW = 1
-	}
-	innerH := height - 2
-	if innerH < 1 {
-		innerH = 1
-	}
+	innerW, innerH := layout.ViewportSize(width, height)
 	content := m.viewport.View()
 	return stylePane.Width(innerW).Height(innerH).Render(content)
 }

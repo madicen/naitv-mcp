@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
@@ -180,22 +181,11 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	listW := w * 35 / 100
-	detailW := w - listW - 1
-	contentH := h - 3
-	if contentH < 1 {
-		contentH = 1
-	}
-	// The detail viewport lives inside the rounded pane (−2 cols/rows) and
-	// shares it with the inline action-button line (−1 row).
-	vpW := detailW - 2
-	if vpW < 1 {
-		vpW = 1
-	}
-	vpH := contentH - 3
-	if vpH < 1 {
-		vpH = 1
-	}
+	_, detailW := layout.SplitWidths(w)
+	contentH := layout.ContentHeight(h, layout.ReviewFooterRows+2)
+	vpW, vpH := layout.ViewportSize(detailW, contentH)
+	// The detail viewport shares the pane with the inline action-button line.
+	vpH = layout.ContentHeight(vpH, 1)
 	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	m.updateViewport()
 }

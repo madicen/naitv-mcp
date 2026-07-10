@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	dropdownv2 "github.com/madicen/bubble-dropdown/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -319,22 +320,9 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 func (m *Model) SetDimensions(w, h int) {
 	m.width = w
 	m.height = h
-	listW := w * 35 / 100
-	detailW := w - listW - 1
-	contentH := h - 4
-	if contentH < 1 {
-		contentH = 1
-	}
-	// The detail pane has a rounded border, so the viewport's usable area is
-	// 2 columns/rows smaller than the pane on each axis.
-	vpW := detailW - 2
-	if vpW < 1 {
-		vpW = 1
-	}
-	vpH := contentH - 2
-	if vpH < 1 {
-		vpH = 1
-	}
+	_, detailW := layout.SplitWidths(w)
+	contentH := layout.ContentHeight(h, layout.EntriesFooterRows+2)
+	vpW, vpH := layout.ViewportSize(detailW, contentH)
 	m.viewport = viewport.New(viewport.WithWidth(vpW), viewport.WithHeight(vpH))
 	m.updateViewport()
 }
