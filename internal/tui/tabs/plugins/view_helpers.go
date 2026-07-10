@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/madicen/naitv-mcp/internal/plugin"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
@@ -42,7 +43,7 @@ func (m *Model) renderList() string {
 		}
 	case modeBrowse:
 		if m.loading {
-			rows = append(rows, theme.DimStyle.Render(" Fetching registry…"))
+			rows = append(rows, m.spin.View()+theme.DimStyle.Render(" Fetching registry…"))
 		} else if len(m.available) == 0 {
 			rows = append(rows, theme.DimStyle.Render(" Press r to fetch registry."))
 		} else {
@@ -92,7 +93,7 @@ func (m *Model) renderDetail() string {
 // detailContent generates the text displayed in the detail viewport.
 func (m *Model) detailContent() string {
 	if m.loading {
-		return theme.DimStyle.Render("Working…")
+		return m.spin.View() + theme.DimStyle.Render(" Working…")
 	}
 	switch m.mode {
 	case modeInstalled:
@@ -186,15 +187,16 @@ func (m *Model) renderBottom() string {
 		return prompt + hint
 	}
 
-	var hints []string
-	hints = append(hints, zones.Button(m.zoneManager, zones.PluginActInstall, "i", "install"))
+	var hints []keymap.ActionZone
+	hints = append(hints, keymap.ActionZone{zones.PluginActInstall, m.keys.Install})
 	if m.mode == modeInstalled {
-		hints = append(hints, zones.Button(m.zoneManager, zones.PluginActUninstall, "u", "uninstall"))
+		hints = append(hints, keymap.ActionZone{zones.PluginActUninstall, m.keys.Uninstall})
 	}
-	hints = append(hints, zones.Button(m.zoneManager, zones.PluginActTab, "tab", "switch view"))
-	hints = append(hints, zones.Button(m.zoneManager, zones.PluginActRefresh, "r", "refresh registry"))
-
-	hintLine := strings.Join(hints, theme.Hint.Render("  "))
+	hints = append(hints,
+		keymap.ActionZone{zones.PluginActTab, m.keys.Tab},
+		keymap.ActionZone{zones.PluginActRefresh, m.keys.Refresh},
+	)
+	hintLine := keymap.RenderActionBar(m.zoneManager, hints)
 
 	statusLine := ""
 	if m.status != "" {

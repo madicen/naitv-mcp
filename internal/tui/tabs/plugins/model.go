@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	"github.com/madicen/naitv-mcp/pkg/entry"
@@ -68,6 +71,8 @@ type Model struct {
 	// Status / loading
 	status  string // flash message (success or error)
 	loading bool   // true while an async op is in flight
+	spin    spinner.Model
+	keys    keymap.Plugins
 }
 
 // NewModel creates a new Plugins tab model.
@@ -77,16 +82,27 @@ func NewModel(zm *zone.Manager) Model {
 	inp.CharLimit = 512
 	inp.SetWidth(52)
 
+	spin := spinner.New()
+	spin.Spinner = spinner.Dot
+	spin.Style = theme.DimStyle
+
 	return Model{
 		zoneManager:    zm,
 		installedNames: make(map[string]bool),
 		input:          inp,
 		detail:         listpane.NewDetail(),
+		spin:           spin,
+		keys:           keymap.DefaultPlugins,
 	}
 }
 
 // Init returns the initial command (none — LoadPluginsCmd is called by root on tab switch).
 func (m Model) Init() tea.Cmd { return nil }
+
+func (m *Model) startLoading() tea.Cmd {
+	m.loading = true
+	return m.spin.Tick
+}
 
 // InputActive returns true when the text input for custom install is open.
 // The root model uses this to suppress the global 'q' quit binding.
@@ -95,8 +111,16 @@ func (m Model) InputActive() bool { return m.inputActive }
 // Update handles messages and returns (updated model, optional request, optional cmd).
 func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	var req *Request
+	var cmd tea.Cmd
 
 	switch msg := msg.(type) {
+
+	case spinner.TickMsg:
+		if m.loading {
+			m.spin, cmd = m.spin.Update(msg)
+			return m, nil, cmd
+		}
+		return m, nil, nil
 
 	// ── Async results ────────────────────────────────────────────────────────
 
@@ -157,13 +181,13 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		if m.inputActive {
-			switch msg.String() {
-			case "esc":
+			switch {
+			case key.Matches(msg, m.keys.InputEsc):
 				m.inputActive = false
 				m.input.Blur()
 				m.input.SetValue("")
 				m.status = ""
-			case "enter":
+			case key.Matches(msg, m.keys.InputEnter):
 				source := strings.TrimSpace(m.input.Value())
 				if source == "" {
 					m.status = "Enter a plugin name, URL, or file path."
@@ -171,79 +195,74 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 				}
 				m.inputActive = false
 				m.input.Blur()
-				m.loading = true
 				m.status = "Installing " + source + "…"
 				req = &Request{Install: true, Source: source}
+				return m, req, m.startLoading()
 			default:
-				var cmd tea.Cmd
 				m.input, cmd = m.input.Update(msg)
 				return m, nil, cmd
 			}
 			return m, req, nil
 		}
 
-		switch msg.String() {
-		case "j", "down":
+		switch {
+		case key.Matches(msg, m.keys.Down):
 			if m.sel.MoveDown(m.listLen()) {
 				m.updateViewport()
 			}
-		case "k", "up":
+		case key.Matches(msg, m.keys.Up):
 			if m.sel.MoveUp() {
 				m.updateViewport()
 			}
-		case "tab":
+		case key.Matches(msg, m.keys.Tab):
 			// Switch between Installed / Browse; trigger registry fetch if switching to Browse.
 			if m.mode == modeInstalled {
 				if len(m.available) == 0 {
-					m.loading = true
 					m.status = "Fetching registry…"
 					req = &Request{FetchRegistry: true}
-				} else {
-					m.mode = modeBrowse
-					m.sel.Index = 0
-					m.updateViewport()
+					return m, req, m.startLoading()
 				}
+				m.mode = modeBrowse
+				m.sel.Index = 0
+				m.updateViewport()
 			} else {
 				m.mode = modeInstalled
 				m.sel.Index = 0
 				m.updateViewport()
 			}
-		case "r":
-			// Refresh registry (always re-fetches)
-			m.loading = true
+		case key.Matches(msg, m.keys.Refresh):
 			m.status = "Fetching registry…"
 			req = &Request{FetchRegistry: true}
-		case "i":
+			return m, req, m.startLoading()
+		case key.Matches(msg, m.keys.Install):
 			switch m.mode {
 			case modeInstalled:
-				// Open text input for custom source.
 				m.inputActive = true
 				m.input.Focus()
 				m.status = ""
 			case modeBrowse:
-				// Install currently highlighted registry plugin.
 				if sel := m.selectedAvailable(); sel != nil {
 					if m.installedNames[sel.Name] {
 						m.status = fmt.Sprintf("Plugin %q is already installed.", sel.Name)
 					} else {
-						m.loading = true
 						m.status = "Installing " + sel.Name + "…"
 						req = &Request{Install: true, Source: sel.Name}
+						return m, req, m.startLoading()
 					}
 				}
 			}
-		case "u":
+		case key.Matches(msg, m.keys.Uninstall):
 			if m.mode == modeInstalled {
 				if sel := m.selectedInstalled(); sel != nil {
-					m.loading = true
 					m.status = "Uninstalling " + sel.Name + "…"
 					req = &Request{Uninstall: true, Name: sel.Name}
+					return m, req, m.startLoading()
 				}
 			}
 		}
 	}
 
-	return m, req, nil
+	return m, req, cmd
 }
 
 // View renders the plugins tab.
