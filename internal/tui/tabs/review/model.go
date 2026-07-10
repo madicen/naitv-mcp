@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/internal/tools"
@@ -31,6 +33,7 @@ type Model struct {
 	pane   listpane.Layout
 	detail listpane.Detail
 	sel    listpane.Selection
+	keys   keymap.Review
 }
 
 // NewModel creates a new review Model.
@@ -38,6 +41,7 @@ func NewModel(zm *zone.Manager) Model {
 	return Model{
 		zoneManager: zm,
 		detail:      listpane.NewDetail(),
+		keys:        keymap.DefaultReview,
 	}
 }
 
@@ -93,32 +97,32 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		return m, nil, nil
 
 	case tea.KeyPressMsg:
-		switch msg.String() {
-		case "j", "down":
+		switch {
+		case key.Matches(msg, m.keys.Down):
 			if m.sel.MoveDown(len(m.proposals)) {
 				m.updateViewport()
 			}
-		case "k", "up":
+		case key.Matches(msg, m.keys.Up):
 			if m.sel.MoveUp() {
 				m.updateViewport()
 			}
-		case "a":
+		case key.Matches(msg, m.keys.Approve):
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveSelected: true}
 			}
-		case "r":
+		case key.Matches(msg, m.keys.Reject):
 			if len(m.proposals) > 0 {
 				req = &Request{RejectSelected: true}
 			}
-		case "e":
+		case key.Matches(msg, m.keys.Edit):
 			if len(m.proposals) > 0 {
 				req = &Request{EditSelected: true}
 			}
-		case "A":
+		case key.Matches(msg, m.keys.ApproveAll):
 			if len(m.proposals) > 0 {
 				req = &Request{ApproveAll: true}
 			}
-		case "esc":
+		case key.Matches(msg, m.keys.Back):
 			req = &Request{SwitchToEntries: true}
 		}
 
@@ -267,9 +271,6 @@ func formatProposalDetail(p entry.Entry) string {
 			sb.WriteString("\nBody:\n" + p.Body + "\n")
 		}
 	}
-
-	sb.WriteString("\n")
-	sb.WriteString("[ ✓ Approve (a) ]  [ ✗ Reject (r) ]  [ ✎ Edit (e) ]\n")
 
 	return sb.String()
 }
