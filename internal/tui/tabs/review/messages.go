@@ -21,3 +21,8 @@ type ProposalRejectedMsg struct {
 type AllApprovedMsg struct {
 	Entries []entry.Entry
 }
+
+// TargetsLoadedMsg is sent when target entries for update proposals have been loaded.
+type TargetsLoadedMsg struct {
+	Targets map[string]entry.Entry
+}

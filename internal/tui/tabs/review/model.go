@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/tui/components/listpane"
+	"github.com/madicen/naitv-mcp/internal/tui/diff"
 	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/markdown"
@@ -21,6 +22,7 @@ type Request struct {
 	ApproveSelected bool
 	RejectSelected  bool
 	EditSelected    bool
+	EditBody        bool
 	ApproveAll      bool
 	SwitchToEntries bool
 }
@@ -29,6 +31,7 @@ type Request struct {
 type Model struct {
 	zoneManager *zone.Manager
 	proposals   []entry.Entry
+	targets     map[string]entry.Entry
 	width, height int
 
 	pane   listpane.Layout
@@ -63,6 +66,11 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 	case ProposalsLoadedMsg:
 		m.proposals = msg.Proposals
 		m.sel.Clamp(len(m.proposals))
+		m.updateViewport()
+		return m, nil, nil
+
+	case TargetsLoadedMsg:
+		m.targets = msg.Targets
 		m.updateViewport()
 		return m, nil, nil
 
@@ -121,6 +129,10 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 		case key.Matches(msg, m.keys.Edit):
 			if len(m.proposals) > 0 {
 				req = &Request{EditSelected: true}
+			}
+		case key.Matches(msg, m.keys.EditBody):
+			if len(m.proposals) > 0 {
+				req = &Request{EditBody: true}
 			}
 		case key.Matches(msg, m.keys.ApproveAll):
 			if len(m.proposals) > 0 {
@@ -258,21 +270,47 @@ func (m *Model) formatProposalDetail(p entry.Entry) string {
 
 	if p.TargetID != "" {
 		sb.WriteString("\nTarget ID: " + p.TargetID + "\n")
-		sb.WriteString("\nChanges proposed:\n")
-		if p.Name != "" {
-			sb.WriteString("  ~ name → " + p.Name + "\n")
-		}
-		if p.Body != "" {
-			sb.WriteString("  ~ body → " + p.Body + "\n")
-		}
-		if p.Kind != "" {
-			sb.WriteString("  ~ kind → " + p.Kind + "\n")
-		}
-		if len(p.Tags) > 0 {
-			sb.WriteString("  ~ tags → " + strings.Join(p.Tags, ", ") + "\n")
-		}
-		for k, v := range p.Fields {
-			sb.WriteString("  ~ " + k + " → " + v + "\n")
+		sb.WriteString("\nChanges proposed:\n\n")
+		if target, ok := m.targets[p.TargetID]; ok {
+			if p.Name != "" && p.Name != target.Name {
+				sb.WriteString(diff.Unified("name", target.Name, p.Name))
+				sb.WriteString("\n\n")
+			}
+			if p.Kind != "" && p.Kind != target.Kind {
+				sb.WriteString(diff.Unified("kind", target.Kind, p.Kind))
+				sb.WriteString("\n\n")
+			}
+			if p.Body != "" && p.Body != target.Body {
+				sb.WriteString(diff.Unified("body", target.Body, p.Body))
+				sb.WriteString("\n\n")
+			}
+			if len(p.Tags) > 0 {
+				oldTags := strings.Join(target.Tags, ", ")
+				newTags := strings.Join(p.Tags, ", ")
+				if oldTags != newTags {
+					sb.WriteString(diff.Unified("tags", oldTags, newTags))
+					sb.WriteString("\n\n")
+				}
+			}
+			if fieldsDiff := diff.FieldsDiff(target.Fields, p.Fields); fieldsDiff != "" {
+				sb.WriteString(fieldsDiff)
+			}
+		} else {
+			if p.Name != "" {
+				sb.WriteString("  ~ name → " + p.Name + "\n")
+			}
+			if p.Body != "" {
+				sb.WriteString("  ~ body → " + p.Body + "\n")
+			}
+			if p.Kind != "" {
+				sb.WriteString("  ~ kind → " + p.Kind + "\n")
+			}
+			if len(p.Tags) > 0 {
+				sb.WriteString("  ~ tags → " + strings.Join(p.Tags, ", ") + "\n")
+			}
+			for k, v := range p.Fields {
+				sb.WriteString("  ~ " + k + " → " + v + "\n")
+			}
 		}
 	} else {
 		if len(p.Fields) > 0 {
