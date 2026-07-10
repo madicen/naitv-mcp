@@ -13,15 +13,13 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/lrstanley/bubblezone/v2 v2.0.0
-	github.com/madicen/bubble-dropdown v0.0.5
+	github.com/madicen/bubble-dropdown/v2 v2.0.1
 	github.com/madicen/bubble-overlay v0.0.0-20260528215458-97d5221a8fee
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/oklog/ulid/v2 v2.1.0
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.53.0
 )
-
-replace github.com/madicen/bubble-dropdown => ../bubble-dropdown
 
 require (
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect

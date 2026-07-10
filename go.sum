@@ -99,6 +99,8 @@ github.com/lrstanley/bubblezone/v2 v2.0.0 h1:pMb9fHKs0slJF6OrzQ2hEgWusqyl9VU/S0U
 github.com/lrstanley/bubblezone/v2 v2.0.0/go.mod h1:yV/QTjcm4Zu5cqvGvdHi7xVUfnB36w/SafOuDp57dgY=
 github.com/lucasb-eyer/go-colorful v1.4.0 h1:UtrWVfLdarDgc44HcS7pYloGHJUjHV/4FwW4TvVgFr4=
 github.com/lucasb-eyer/go-colorful v1.4.0/go.mod h1:R4dSotOR9KMtayYi1e77YzuveK+i7ruzyGqttikkLy0=
+github.com/madicen/bubble-dropdown/v2 v2.0.1 h1:/fFlcHdkh+W7JhWTKcpAjsUHJ8Rkgfv0Xi4PO20sboE=
+github.com/madicen/bubble-dropdown/v2 v2.0.1/go.mod h1:kmVL2VXHVKXiReD+ASbGLeyg9QRQEV9YlHhKqcvG7aA=
 github.com/madicen/bubble-overlay v0.0.0-20260528215458-97d5221a8fee h1:HqAtffiPMA/2cGEZQ31JIybgPuNRw3C6wDVfbM/6B4c=
 github.com/madicen/bubble-overlay v0.0.0-20260528215458-97d5221a8fee/go.mod h1:ORdxBpICBUVKcWInZJbjk3ITTemh2rK3DYSDHykkp10=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
