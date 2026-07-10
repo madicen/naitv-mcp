@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/madicen/naitv-mcp/internal/xpath"
 )
 
 // Result holds the output from running an executable tool.
@@ -47,7 +48,7 @@ func Run(ctx context.Context, def Def, args map[string]string) Result {
 		workDir = "" // unresolved placeholder — use server CWD
 	}
 	if workDir != "" {
-		c.Dir = expandHome(workDir)
+		c.Dir = xpath.ExpandHome(workDir)
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -118,19 +119,6 @@ func interpolate(template string, args map[string]string) string {
 		result = strings.ReplaceAll(result, "{"+k+"}", v)
 	}
 	return result
-}
-
-// expandHome replaces a leading ~ with the user's home directory.
-// If os.UserHomeDir fails, the path is returned unchanged.
-func expandHome(path string) string {
-	if !strings.HasPrefix(path, "~") {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return path
-	}
-	return filepath.Join(home, path[1:])
 }
 
 var defaultEnvAllowlist = []string{"PATH", "HOME"}

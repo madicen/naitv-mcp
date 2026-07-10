@@ -16,6 +16,7 @@ import (
 
 	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/internal/tools"
+	"github.com/madicen/naitv-mcp/internal/xpath"
 )
 
 // SetProjectResult summarises what SetProject changed.
@@ -141,13 +142,7 @@ func ResolveDir(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	if strings.HasPrefix(path, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", fmt.Errorf("expand ~: %w", err)
-		}
-		path = filepath.Join(home, path[1:])
-	}
+	path = xpath.ExpandHome(path)
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", fmt.Errorf("resolve path: %w", err)

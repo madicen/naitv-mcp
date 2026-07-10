@@ -6,8 +6,9 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strings"
 	"time"
+
+	"github.com/madicen/naitv-mcp/internal/xpath"
 )
 
 // Load fetches and parses a plugin manifest from a URL or local file path.
@@ -23,7 +24,7 @@ func Load(source string) (Manifest, error) {
 		data []byte
 		err  error
 	)
-	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+	if xpath.IsHTTP(source) {
 		data, err = fetchURL(source)
 	} else {
 		data, err = readFile(source)
@@ -56,14 +57,6 @@ func fetchURL(url string) ([]byte, error) {
 	return io.ReadAll(resp.Body)
 }
 
-// readFile reads a file from disk, expanding a leading ~ to the home directory.
 func readFile(path string) ([]byte, error) {
-	if strings.HasPrefix(path, "~") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("expand home directory: %w", err)
-		}
-		path = home + path[1:]
-	}
-	return os.ReadFile(path)
+	return os.ReadFile(xpath.ExpandHome(path))
 }
