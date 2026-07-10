@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/madicen/naitv-mcp/internal/setup"
 	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/internal/tools"
+	"github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -22,6 +24,27 @@ var Version = "0.1.0"
 func Run(st *store.Store) error {
 	server := NewServer(st)
 	return server.Run(context.Background(), &sdkmcp.StdioTransport{})
+}
+
+// RunHTTP serves MCP over streamable HTTP on addr. When token is non-empty,
+// requests must include Authorization: Bearer <token>.
+func RunHTTP(st *store.Store, addr, token string) error {
+	server := NewServer(st)
+	var handler http.Handler = sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server {
+		return server
+	}, &sdkmcp.StreamableHTTPOptions{JSONResponse: true})
+	if token != "" {
+		want := token
+		verifier := func(_ context.Context, tok string, _ *http.Request) (*auth.TokenInfo, error) {
+			if tok != want {
+				return nil, auth.ErrInvalidToken
+			}
+			return &auth.TokenInfo{Scopes: []string{"mcp"}}, nil
+		}
+		handler = auth.RequireBearerToken(verifier, nil)(handler)
+	}
+	fmt.Fprintf(os.Stderr, "naitv-mcp: listening on http://%s\n", addr)
+	return http.ListenAndServe(addr, handler)
 }
 
 // NewServer builds a configured MCP server without starting a transport.
@@ -48,6 +71,10 @@ func toolError(format string, args ...any) (*sdkmcp.CallToolResult, any, error) 
 		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: fmt.Sprintf(format, args...)}},
 		IsError: true,
 	}, nil, nil
+}
+
+type initializeArgs struct {
+	Kinds string `json:"kinds,omitempty" jsonschema:"Comma-separated entry kinds to include (e.g. rule,tool). Empty means all init-delivery kinds."`
 }
 
 type listEntriesArgs struct {
@@ -104,12 +131,18 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "initialize",
 		Description: "Return the user's standing instructions, rendered from context entries marked for initialization (rules, tooling preferences, workflows, agent roles, repos, facts, notes). Call this at the start of a session to work the way the user prefers. Entries marked on-demand are not included here; fetch those with get_entry or search_entries when relevant.",
-	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, _ struct{}) (*sdkmcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, args initializeArgs) (*sdkmcp.CallToolResult, any, error) {
 		entries, err := st.List("", nil)
 		if err != nil {
 			return toolError("initialize error: %v", err)
 		}
-		return textResult(instructions.Render(instructions.FilterInit(entries)))
+		initEntries := instructions.FilterInitByKinds(entries, parseTags(args.Kinds))
+		ids := make([]string, 0, len(initEntries))
+		for _, e := range initEntries {
+			ids = append(ids, e.ID)
+		}
+		_ = st.RecordAccessBatch(ids)
+		return textResult(instructions.Render(initEntries))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -137,6 +170,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 				return toolError("entry not found: %s", args.IDOrName)
 			}
 		}
+		_ = st.RecordAccess(e.ID)
 		return textResult(formatEntry(e))
 	})
 
@@ -151,6 +185,11 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("search error: %v", err)
 		}
+		ids := make([]string, 0, len(entries))
+		for _, e := range entries {
+			ids = append(ids, e.ID)
+		}
+		_ = st.RecordAccessBatch(ids)
 		return textResult(formatEntries(entries))
 	})
 
