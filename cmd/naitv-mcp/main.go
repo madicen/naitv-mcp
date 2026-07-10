@@ -6,11 +6,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/madicen/naitv-mcp/internal/doctor"
 	"github.com/madicen/naitv-mcp/internal/instructions"
 	"github.com/madicen/naitv-mcp/internal/mcp"
 	"github.com/madicen/naitv-mcp/internal/store"
@@ -45,12 +47,13 @@ func newRootCmd() *cobra.Command {
 	root.Flags().BoolVar(&demo, "demo", false, "Run with seeded demo data (for VHS recordings)")
 	root.PersistentFlags().String("db", store.DefaultDBPath(), "Path to SQLite database")
 
-	root.AddCommand(newServeCmd(), newInitCmd(), newExportCmd(), newImportCmd(), newSeedDemoCmd())
+	root.AddCommand(newServeCmd(), newInitCmd(), newExportCmd(), newImportCmd(), newDoctorCmd(), newSeedDemoCmd())
 	return root
 }
 
 func newServeCmd() *cobra.Command {
-	return &cobra.Command{
+	var httpAddr, token string
+	cmd := &cobra.Command{
 		Use:   "serve",
 		Short: "Run the MCP server over stdio",
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -63,13 +66,36 @@ func newServeCmd() *cobra.Command {
 				return fmt.Errorf("open store: %w", err)
 			}
 			defer st.Close()
+			if httpAddr != "" {
+				return mcp.RunHTTP(st, httpAddr, token)
+			}
 			return mcp.Run(st)
 		},
 	}
+	cmd.Flags().StringVar(&httpAddr, "http", "", "Serve streamable HTTP on this address (e.g. :8321)")
+	cmd.Flags().StringVar(&token, "token", "", "Bearer token required for HTTP transport")
+	return cmd
+}
+
+func newDoctorCmd() *cobra.Command {
+	var rebuildFTS bool
+	cmd := &cobra.Command{
+		Use:   "doctor",
+		Short: "Check database health and print MCP client config",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dbPath, err := cmd.Flags().GetString("db")
+			if err != nil {
+				return err
+			}
+			return doctor.Run(dbPath, rebuildFTS)
+		},
+	}
+	cmd.Flags().BoolVar(&rebuildFTS, "rebuild-fts", false, "Rebuild FTS index when out of sync")
+	return cmd
 }
 
 func newInitCmd() *cobra.Command {
-	var out string
+	var out, kinds string
 	cmd := &cobra.Command{
 		Use:   "init",
 		Short: "Write the initialization bundle to a file",
@@ -78,10 +104,11 @@ func newInitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runInit(dbPath, out)
+			return runInit(dbPath, out, kinds)
 		},
 	}
 	cmd.Flags().StringVar(&out, "out", "AGENTS.md", "Output file path. Use '-' to write to stdout.")
+	cmd.Flags().StringVar(&kinds, "kinds", "", "Comma-separated kinds to include (e.g. rule,tool)")
 	return cmd
 }
 
@@ -177,7 +204,7 @@ func newSeedDemoCmd() *cobra.Command {
 	}
 }
 
-func runInit(dbPath, out string) error {
+func runInit(dbPath, out, kinds string) error {
 	st, err := store.Open(dbPath)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
@@ -189,7 +216,16 @@ func runInit(dbPath, out string) error {
 		return fmt.Errorf("list entries: %w", err)
 	}
 
-	initEntries := instructions.FilterInit(entries)
+	var kindList []string
+	if kinds != "" {
+		for _, k := range strings.Split(kinds, ",") {
+			k = strings.TrimSpace(k)
+			if k != "" {
+				kindList = append(kindList, k)
+			}
+		}
+	}
+	initEntries := instructions.FilterInitByKinds(entries, kindList)
 	doc := instructions.Render(initEntries)
 
 	if out == "-" {
