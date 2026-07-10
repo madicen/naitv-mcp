@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -9,33 +10,20 @@ import (
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
-// InstallResult summarizes the outcome of an Install call.
 type InstallResult struct {
-	Manifest Manifest // parsed manifest that was installed
-	Source   string   // resolved URL or file path
-	Proposed []string // entry names queued as pending proposals
-	Skipped  []string // entry names that already existed (not re-proposed)
+	Manifest Manifest
+	Source   string
+	Proposed []string
+	Skipped  []string
 }
 
-// UninstallResult summarizes the outcome of an Uninstall call.
 type UninstallResult struct {
 	Name    string
-	Removed []string // entry names that were deleted
-	Missing []string // entry names not found (already manually deleted)
+	Removed []string
+	Missing []string
 }
 
-// Install fetches a plugin manifest from source and proposes all its entries
-// as pending in st, preserving the human-in-the-loop approval gate.
-//
-// source may be:
-//   - a plugin name ("loop-engineering-go")  → resolved via DefaultRegistryURL
-//   - a URL ("https://...")                  → fetched directly
-//   - a local file path ("./plugins/foo.json", "~/foo.json", "/abs/path")
-//
-// Returns an error if the plugin is already installed. Call Uninstall first
-// to reinstall.
 func Install(st *store.Store, source string) (*InstallResult, error) {
-	// Resolve a plain name to a URL via the default registry.
 	resolvedSource := source
 	if !xpath.IsHTTP(source) && !xpath.IsFilePath(source) {
 		reg, err := LoadRegistry(DefaultRegistryURL)
@@ -54,7 +42,6 @@ func Install(st *store.Store, source string) (*InstallResult, error) {
 		return nil, err
 	}
 
-	// Reject if already installed.
 	installed, _ := st.List("plugin", nil)
 	for _, pe := range installed {
 		if pe.Name == m.Name {
@@ -62,34 +49,41 @@ func Install(st *store.Store, source string) (*InstallResult, error) {
 		}
 	}
 
-	// Build a name index across all active + pending entries to skip duplicates.
 	existing, _ := st.List("", nil)
 	pending, _ := st.ListPending()
 	nameSet := make(map[string]bool, len(existing)+len(pending))
+	nameToID := make(map[string]string, len(existing)+len(pending))
 	for _, e := range existing {
 		nameSet[e.Name] = true
+		nameToID[e.Name] = e.ID
 	}
 	for _, e := range pending {
 		nameSet[e.Name] = true
+		nameToID[e.Name] = e.ID
 	}
 
 	result := &InstallResult{Manifest: m, Source: resolvedSource}
 	proposedBy := "plugin:" + m.Name
+	var entryIDs []string
 	for _, spec := range m.Entries {
 		if nameSet[spec.Name] {
 			result.Skipped = append(result.Skipped, spec.Name)
+			if id, ok := nameToID[spec.Name]; ok {
+				entryIDs = append(entryIDs, id)
+			}
 			continue
 		}
 		e := spec.ToEntry(proposedBy)
-		if _, err := st.CreatePending(e); err != nil {
+		created, err := st.CreatePending(e)
+		if err != nil {
 			return result, fmt.Errorf("propose %q: %w", spec.Name, err)
 		}
 		result.Proposed = append(result.Proposed, spec.Name)
+		entryIDs = append(entryIDs, created.ID)
 		nameSet[spec.Name] = true
 	}
 
-	// Create an active plugin tracking entry so list_plugins / Plugins tab
-	// can show it and uninstall can find it later.
+	idsJSON, _ := json.Marshal(entryIDs)
 	allNames := append(result.Proposed, result.Skipped...)
 	_, _ = st.Create(entry.Entry{
 		Kind:  "plugin",
@@ -102,15 +96,13 @@ func Install(st *store.Store, source string) (*InstallResult, error) {
 			"author":      m.Author,
 			"entry_count": fmt.Sprintf("%d", len(m.Entries)),
 			"entry_names": strings.Join(allNames, ","),
+			"entry_ids":   string(idsJSON),
 		},
 	})
 	return result, nil
 }
 
-// Uninstall removes the named plugin's tracking entry and all entries it
-// originally proposed (both active and pending) from st.
 func Uninstall(st *store.Store, name string) (*UninstallResult, error) {
-	// Find the plugin tracking entry.
 	pluginEntries, _ := st.List("plugin", nil)
 	var track *entry.Entry
 	for i, pe := range pluginEntries {
@@ -123,16 +115,70 @@ func Uninstall(st *store.Store, name string) (*UninstallResult, error) {
 		return nil, fmt.Errorf("plugin %q is not installed", name)
 	}
 
-	// Parse the comma-separated entry_names field.
-	var entryNames []string
-	for _, n := range strings.Split(track.Fields["entry_names"], ",") {
-		n = strings.TrimSpace(n)
-		if n != "" {
-			entryNames = append(entryNames, n)
+	entryIDs := EntryIDs(st, *track)
+	result := &UninstallResult{Name: name}
+
+	if len(entryIDs) > 0 {
+		for _, id := range entryIDs {
+			e, err := st.Get(id)
+			if err != nil {
+				result.Missing = append(result.Missing, id)
+				continue
+			}
+			if err := st.Delete(id); err != nil {
+				result.Missing = append(result.Missing, e.Name)
+				continue
+			}
+			result.Removed = append(result.Removed, e.Name)
+		}
+	} else {
+		active, _ := st.List("", nil)
+		pending, _ := st.ListPending()
+		nameToID := make(map[string]string, len(active)+len(pending))
+		for _, e := range active {
+			nameToID[e.Name] = e.ID
+		}
+		for _, e := range pending {
+			nameToID[e.Name] = e.ID
+		}
+		for _, n := range strings.Split(track.Fields["entry_names"], ",") {
+			n = strings.TrimSpace(n)
+			if n == "" {
+				continue
+			}
+			id, ok := nameToID[n]
+			if !ok {
+				result.Missing = append(result.Missing, n)
+				continue
+			}
+			if err := st.Delete(id); err != nil {
+				result.Missing = append(result.Missing, n)
+				continue
+			}
+			result.Removed = append(result.Removed, n)
 		}
 	}
+	_ = st.Delete(track.ID)
+	return result, nil
+}
 
-	// Build a name→ID index across active + pending entries.
+func parseEntryIDs(track entry.Entry) []string {
+	raw := track.Fields["entry_ids"]
+	if raw == "" {
+		return nil
+	}
+	var ids []string
+	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
+		return nil
+	}
+	return ids
+}
+
+func EntryIDs(st *store.Store, track entry.Entry) []string {
+	if ids := parseEntryIDs(track); len(ids) > 0 {
+		return ids
+	}
+	var ids []string
 	active, _ := st.List("", nil)
 	pending, _ := st.ListPending()
 	nameToID := make(map[string]string, len(active)+len(pending))
@@ -142,20 +188,14 @@ func Uninstall(st *store.Store, name string) (*UninstallResult, error) {
 	for _, e := range pending {
 		nameToID[e.Name] = e.ID
 	}
-
-	result := &UninstallResult{Name: name}
-	for _, n := range entryNames {
-		id, ok := nameToID[n]
-		if !ok {
-			result.Missing = append(result.Missing, n)
+	for _, n := range strings.Split(track.Fields["entry_names"], ",") {
+		n = strings.TrimSpace(n)
+		if n == "" {
 			continue
 		}
-		if err := st.Delete(id); err != nil {
-			result.Missing = append(result.Missing, n)
-			continue
+		if id, ok := nameToID[n]; ok {
+			ids = append(ids, id)
 		}
-		result.Removed = append(result.Removed, n)
 	}
-	_ = st.Delete(track.ID)
-	return result, nil
+	return ids
 }

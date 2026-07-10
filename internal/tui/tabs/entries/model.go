@@ -204,7 +204,7 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 			default:
 				m.searchInput, cmd = m.searchInput.Update(msg)
 			}
-			return m, nil, cmd
+			return m, req, cmd
 		}
 
 		switch {

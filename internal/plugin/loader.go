@@ -11,19 +11,9 @@ import (
 	"github.com/madicen/naitv-mcp/internal/xpath"
 )
 
-// Load fetches and parses a plugin manifest from a URL or local file path.
-//
-// URL sources (http:// or https://) are fetched with a 30 s timeout.
-// All other values are treated as file system paths; a leading ~ is expanded
-// to the current user's home directory.
-//
-// Returns an error if the source cannot be read, the JSON cannot be parsed, or
-// the manifest is missing its required name field.
 func Load(source string) (Manifest, error) {
-	var (
-		data []byte
-		err  error
-	)
+	var data []byte
+	var err error
 	if xpath.IsHTTP(source) {
 		data, err = fetchURL(source)
 	} else {
@@ -32,18 +22,34 @@ func Load(source string) (Manifest, error) {
 	if err != nil {
 		return Manifest{}, fmt.Errorf("load plugin %q: %w", source, err)
 	}
-
 	var m Manifest
 	if err := json.Unmarshal(data, &m); err != nil {
 		return Manifest{}, fmt.Errorf("parse plugin %q: %w", source, err)
 	}
-	if m.Name == "" {
-		return Manifest{}, fmt.Errorf("plugin manifest %q: name field is required", source)
+	if err := validateManifest(m, source); err != nil {
+		return Manifest{}, err
 	}
 	return m, nil
 }
 
-// fetchURL performs an HTTP GET and returns the response body.
+func validateManifest(m Manifest, source string) error {
+	if m.Name == "" {
+		return fmt.Errorf("plugin manifest %q: name field is required", source)
+	}
+	if m.Version == "" {
+		return fmt.Errorf("plugin manifest %q: version field is required", source)
+	}
+	for i, spec := range m.Entries {
+		if spec.Kind == "" {
+			return fmt.Errorf("plugin manifest %q: entry[%d] missing kind", source, i)
+		}
+		if spec.Name == "" {
+			return fmt.Errorf("plugin manifest %q: entry[%d] missing name", source, i)
+		}
+	}
+	return nil
+}
+
 func fetchURL(url string) ([]byte, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Get(url)

@@ -263,9 +263,15 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Next):
 			m.focusIdx = (m.focusIdx + 1) % m.fieldCount()
 			m.applyFocus()
+			if m.focusIdx == 1 && m.huhForm != nil {
+				return m, m.huhForm.Init()
+			}
 		case key.Matches(msg, m.keys.Prev):
 			m.focusIdx = (m.focusIdx - 1 + m.fieldCount()) % m.fieldCount()
 			m.applyFocus()
+			if m.focusIdx == 1 && m.huhForm != nil {
+				return m, m.huhForm.Init()
+			}
 		case key.Matches(msg, m.keys.Submit):
 			if m.focusIdx == m.focusIdxAddField() {
 				m.addField()
