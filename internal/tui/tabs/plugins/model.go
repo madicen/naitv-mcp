@@ -15,6 +15,7 @@ import (
 	"github.com/madicen/naitv-mcp/internal/tui/keymap"
 	"github.com/madicen/naitv-mcp/internal/tui/layout"
 	"github.com/madicen/naitv-mcp/internal/tui/theme"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -215,54 +216,103 @@ func (m Model) Update(msg tea.Msg) (Model, *Request, tea.Cmd) {
 				m.updateViewport()
 			}
 		case key.Matches(msg, m.keys.Tab):
-			// Switch between Installed / Browse; trigger registry fetch if switching to Browse.
 			if m.mode == modeInstalled {
-				if len(m.available) == 0 {
-					m.status = "Fetching registry…"
-					req = &Request{FetchRegistry: true}
-					return m, req, m.startLoading()
-				}
-				m.mode = modeBrowse
-				m.sel.Index = 0
-				m.updateViewport()
-			} else {
-				m.mode = modeInstalled
-				m.sel.Index = 0
-				m.updateViewport()
+				return m.activateMode(modeBrowse)
 			}
+			return m.activateMode(modeInstalled)
 		case key.Matches(msg, m.keys.Refresh):
-			m.status = "Fetching registry…"
-			req = &Request{FetchRegistry: true}
-			return m, req, m.startLoading()
+			return m.refreshRegistry()
 		case key.Matches(msg, m.keys.Install):
-			switch m.mode {
-			case modeInstalled:
-				m.inputActive = true
-				m.input.Focus()
-				m.status = ""
-			case modeBrowse:
-				if sel := m.selectedAvailable(); sel != nil {
-					if m.installedNames[sel.Name] {
-						m.status = fmt.Sprintf("Plugin %q is already installed.", sel.Name)
-					} else {
-						m.status = "Installing " + sel.Name + "…"
-						req = &Request{Install: true, Source: sel.Name}
-						return m, req, m.startLoading()
-					}
-				}
-			}
+			return m.doInstall()
 		case key.Matches(msg, m.keys.Uninstall):
+			return m.doUninstall()
+		}
+
+	case tea.MouseClickMsg:
+		if m.inputActive {
+			return m, nil, nil
+		}
+		switch {
+		case m.zoneManager.Get(zones.PluginModeInstalled).InBounds(msg):
+			return m.activateMode(modeInstalled)
+		case m.zoneManager.Get(zones.PluginModeBrowse).InBounds(msg):
+			return m.activateMode(modeBrowse)
+		case m.zoneManager.Get(zones.PluginActInstall).InBounds(msg):
+			return m.doInstall()
+		case m.zoneManager.Get(zones.PluginActUninstall).InBounds(msg):
+			return m.doUninstall()
+		case m.zoneManager.Get(zones.PluginActTab).InBounds(msg):
 			if m.mode == modeInstalled {
-				if sel := m.selectedInstalled(); sel != nil {
-					m.status = "Uninstalling " + sel.Name + "…"
-					req = &Request{Uninstall: true, Name: sel.Name}
-					return m, req, m.startLoading()
+				return m.activateMode(modeBrowse)
+			}
+			return m.activateMode(modeInstalled)
+		case m.zoneManager.Get(zones.PluginActRefresh).InBounds(msg):
+			return m.refreshRegistry()
+		default:
+			for i := 0; i < m.listLen(); i++ {
+				if m.zoneManager.Get(zones.PluginRow(i)).InBounds(msg) {
+					m.sel.Index = i
+					m.updateViewport()
+					break
 				}
 			}
 		}
+		return m, nil, nil
+
+	case tea.MouseWheelMsg:
+		m.detail, cmd = m.detail.Update(msg)
+		return m, nil, cmd
 	}
 
 	return m, req, cmd
+}
+
+// activateMode switches Installed/Browse. Browse with an empty registry fetches it.
+func (m Model) activateMode(target viewMode) (Model, *Request, tea.Cmd) {
+	if m.mode == target {
+		return m, nil, nil
+	}
+	if target == modeBrowse && len(m.available) == 0 {
+		return m.refreshRegistry()
+	}
+	m.mode = target
+	m.sel.Index = 0
+	m.updateViewport()
+	return m, nil, nil
+}
+
+func (m Model) refreshRegistry() (Model, *Request, tea.Cmd) {
+	m.status = "Fetching registry…"
+	return m, &Request{FetchRegistry: true}, m.startLoading()
+}
+
+func (m Model) doInstall() (Model, *Request, tea.Cmd) {
+	switch m.mode {
+	case modeInstalled:
+		m.inputActive = true
+		m.input.Focus()
+		m.status = ""
+	case modeBrowse:
+		if sel := m.selectedAvailable(); sel != nil {
+			if m.installedNames[sel.Name] {
+				m.status = fmt.Sprintf("Plugin %q is already installed.", sel.Name)
+			} else {
+				m.status = "Installing " + sel.Name + "…"
+				return m, &Request{Install: true, Source: sel.Name}, m.startLoading()
+			}
+		}
+	}
+	return m, nil, nil
+}
+
+func (m Model) doUninstall() (Model, *Request, tea.Cmd) {
+	if m.mode == modeInstalled {
+		if sel := m.selectedInstalled(); sel != nil {
+			m.status = "Uninstalling " + sel.Name + "…"
+			return m, &Request{Uninstall: true, Name: sel.Name}, m.startLoading()
+		}
+	}
+	return m, nil, nil
 }
 
 // View renders the plugins tab.
