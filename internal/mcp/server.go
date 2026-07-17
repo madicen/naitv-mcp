@@ -51,9 +51,9 @@ func RunHTTP(st *store.Store, addr, token string) error {
 func NewServer(st *store.Store) *sdkmcp.Server {
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "naitv-mcp", Version: Version}, nil)
 	registerStaticTools(server, st)
-	if err := registerDynamicTools(server, st); err != nil {
-		fmt.Fprintf(os.Stderr, "naitv-mcp: dynamic tools: %v\n", err)
-	}
+	registerResources(server, st)
+	registerPrompts(server, st)
+	newDynamicToolRegistry(server, st).wire()
 	return server
 }
 
@@ -68,6 +68,10 @@ func toolError(format string, args ...any) (*sdkmcp.CallToolResult, any, error) 
 		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: fmt.Sprintf(format, args...)}},
 		IsError: true,
 	}, nil, nil
+}
+
+type initializeArgs struct {
+	Kinds string `json:"kinds,omitempty" jsonschema:"Comma-separated entry kinds to include (e.g. rule,tool). Empty means all init-delivery kinds."`
 }
 
 type listEntriesArgs struct {
@@ -124,12 +128,18 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
 		Name:        "initialize",
 		Description: "Return the user's standing instructions, rendered from context entries marked for initialization (rules, tooling preferences, workflows, agent roles, repos, facts, notes). Call this at the start of a session to work the way the user prefers. Entries marked on-demand are not included here; fetch those with get_entry or search_entries when relevant.",
-	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, _ struct{}) (*sdkmcp.CallToolResult, any, error) {
+	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, args initializeArgs) (*sdkmcp.CallToolResult, any, error) {
 		entries, err := st.List("", nil)
 		if err != nil {
 			return toolError("initialize error: %v", err)
 		}
-		return textResult(instructions.Render(instructions.FilterInit(entries)))
+		initEntries := instructions.FilterInitByKinds(entries, parseTags(args.Kinds))
+		ids := make([]string, 0, len(initEntries))
+		for _, e := range initEntries {
+			ids = append(ids, e.ID)
+		}
+		_ = st.RecordAccessBatch(ids)
+		return toolResult(instructions.Render(initEntries), structuredEntries(initEntries))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -140,7 +150,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("list_entries error: %v", err)
 		}
-		return textResult(formatEntries(entries))
+		return toolResult(formatEntries(entries), structuredEntries(entries))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -157,7 +167,8 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 				return toolError("entry not found: %s", args.IDOrName)
 			}
 		}
-		return textResult(formatEntry(e))
+		_ = st.RecordAccess(e.ID)
+		return toolResult(formatEntry(e), map[string]any{"entry": structuredEntry(e)})
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -171,7 +182,12 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("search error: %v", err)
 		}
-		return textResult(formatEntries(entries))
+		ids := make([]string, 0, len(entries))
+		for _, e := range entries {
+			ids = append(ids, e.ID)
+		}
+		_ = st.RecordAccessBatch(ids)
+		return toolResult(formatEntries(entries), structuredEntries(entries))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -204,7 +220,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("%v", err)
 		}
-		return textResult(text)
+		return toolResult(text, result)
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -234,7 +250,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("%v", err)
 		}
-		return textResult(text)
+		return toolResult(text, result)
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -245,7 +261,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		if err != nil {
 			return toolError("list_tools error: %v", err)
 		}
-		return textResult(formatToolDefs(defs))
+		return toolResult(formatToolDefs(defs), structuredToolDefs(defs))
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
@@ -274,7 +290,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 			}
 		}
 		sb.WriteString("\nReview and approve entries in the naitv-mcp TUI (Review tab).")
-		sb.WriteString("\nRestart naitv-mcp serve after approving to activate executable tools.")
+		sb.WriteString("\nExecutable tools hot-reload after approval (no server restart needed).")
 		if len(result.Proposed) > 0 {
 			sb.WriteString("\nThen call set_project to point the tools at your project directory.")
 		}
@@ -351,7 +367,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 				fmt.Fprintf(&sb, "  ? %s\n", n)
 			}
 		}
-		sb.WriteString("\nRestart naitv-mcp serve for changes to take effect.")
+		sb.WriteString("\nDynamic tools hot-reload automatically after approval.")
 		return textResult(sb.String())
 	})
 
@@ -389,7 +405,7 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 			}
 		}
 		if len(result.Updated) > 0 {
-			sb.WriteString("\nRestart naitv-mcp serve for the changes to take effect.")
+			sb.WriteString("\nDynamic tools hot-reload automatically after approval.")
 		} else {
 			sb.WriteString("No changes needed — all tools already point at the correct directory.")
 		}
@@ -411,20 +427,20 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		}
 		return textResult(setup.ContinueConfig(toolNames, binaryPath))
 	})
-}
 
-func registerDynamicTools(s *sdkmcp.Server, st *store.Store) error {
-	defs, err := tools.ListDefs(st)
-	if err != nil {
-		return err
-	}
-	for _, def := range defs {
-		registerOne(s, def)
-	}
-	if len(defs) > 0 {
-		fmt.Fprintf(os.Stderr, "naitv-mcp: registered %d dynamic tool(s)\n", len(defs))
-	}
-	return nil
+	sdkmcp.AddTool(s, &sdkmcp.Tool{
+		Name:        "export_entries",
+		Description: "Export all entries as JSON (schema_version, exported_at, entries). Use for backup or sync between machines.",
+	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, _ struct{}) (*sdkmcp.CallToolResult, any, error) {
+		var buf strings.Builder
+		if err := st.ExportJSON(&buf); err != nil {
+			return toolError("export_entries error: %v", err)
+		}
+		text := buf.String()
+		var structured map[string]any
+		_ = json.Unmarshal([]byte(text), &structured)
+		return toolResult(text, structured)
+	})
 }
 
 func registerOne(s *sdkmcp.Server, def tools.Def) {
