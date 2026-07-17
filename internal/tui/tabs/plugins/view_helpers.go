@@ -26,6 +26,8 @@ func (m *Model) renderList() string {
 	} else {
 		browLabel = theme.PluginMode.Render("Browse")
 	}
+	instLabel = m.zoneManager.Mark(zones.PluginModeInstalled, instLabel)
+	browLabel = m.zoneManager.Mark(zones.PluginModeBrowse, browLabel)
 	modeLine := instLabel + theme.DimStyle.Render(" | ") + browLabel
 
 	var rows []string
@@ -39,7 +41,7 @@ func (m *Model) renderList() string {
 			rows = append(rows, theme.DimStyle.Render(" Press i to install one."))
 		} else {
 			for i, e := range m.installed {
-				rows = append(rows, renderInstalledRow(e, i == m.sel.Index, w))
+				rows = append(rows, m.zoneManager.Mark(zones.PluginRow(i), renderInstalledRow(e, i == m.sel.Index, w)))
 			}
 		}
 	case modeBrowse:
@@ -49,7 +51,8 @@ func (m *Model) renderList() string {
 			rows = append(rows, theme.DimStyle.Render(" Press r to fetch registry."))
 		} else {
 			for i, re := range m.available {
-				rows = append(rows, renderAvailableRow(re, i == m.sel.Index, w, m.installedNames[re.Name]))
+				row := renderAvailableRow(re, i == m.sel.Index, w, m.installedNames[re.Name])
+				rows = append(rows, m.zoneManager.Mark(zones.PluginRow(i), row))
 			}
 		}
 	}

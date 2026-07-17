@@ -372,8 +372,11 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 	})
 
 	sdkmcp.AddTool(s, &sdkmcp.Tool{
-		Name:        "set_project",
-		Description: "Update the working_dir field on all active executable tool entries to point at the given project root.",
+		Name: "set_project",
+		Description: "Prepare verification tools for a project. Tools that declare a " +
+			"project_root parameter keep working_dir={project_root} (pass the path on each " +
+			"build/vet/test call). Other tools get working_dir set to project_dir. " +
+			"Direct write, not a proposal. Optionally enables the lint tool.",
 	}, func(ctx context.Context, req *sdkmcp.CallToolRequest, args setProjectArgs) (*sdkmcp.CallToolResult, any, error) {
 		projectDir, err := setup.ResolveDir(args.ProjectDir)
 		if err != nil {
@@ -389,10 +392,11 @@ func registerStaticTools(s *sdkmcp.Server, st *store.Store) {
 		}
 		var sb strings.Builder
 		if len(result.Updated) > 0 {
-			fmt.Fprintf(&sb, "Updated working_dir → %s on:\n", projectDir)
+			fmt.Fprintf(&sb, "Updated tools for project %s:\n", projectDir)
 			for _, n := range result.Updated {
 				fmt.Fprintf(&sb, "  ✓ %s\n", n)
 			}
+			sb.WriteString("Tools with a project_root param use working_dir={project_root}; pass the path on each call.\n")
 		}
 		if len(result.Skipped) > 0 {
 			sb.WriteString("\nAlready correct (skipped):\n")

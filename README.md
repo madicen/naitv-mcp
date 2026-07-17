@@ -171,7 +171,7 @@ naitv-mcp seed-demo    # idempotent; populates the default DB if empty
 | `list_plugins` | List installed plugins with version and entry count. |
 | `list_available_plugins` | Fetch plugins from the public registry (or a custom `registry_url`). |
 | `uninstall_plugin` | Remove a plugin and all of its entries. |
-| `set_project` | Update `working_dir` on all active executable tools to a project root. |
+| `set_project` | For tools with a `project_root` param, restore `working_dir={project_root}`; otherwise set `working_dir` to the project root. Optionally enable lint. |
 | `export_entries` | Export all entries as JSON for backup or sync. |
 | `generate_continue_config` | Generate a `.continue/config.yaml` wired to this server. |
 

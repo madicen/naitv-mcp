@@ -4,10 +4,12 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 	"github.com/madicen/naitv-mcp/internal/plugin"
+	"github.com/madicen/naitv-mcp/internal/tui/zones"
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
@@ -261,6 +263,96 @@ func TestUpdate_PluginUninstalled_Success(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Fatal("expected reload installed command")
+	}
+}
+
+func TestUpdate_MouseModeAndRowClick(t *testing.T) {
+	zm := zone.New()
+	m := NewModel(zm)
+	m.SetDimensions(120, 40)
+	m.installed = []entry.Entry{
+		{Kind: "plugin", Name: "first"},
+		{Kind: "plugin", Name: "second"},
+	}
+	m.available = []plugin.RegistryEntry{
+		{Name: "browse-a"},
+		{Name: "browse-b"},
+	}
+	m.sel.Index = 0
+
+	_ = zm.Scan(m.View())
+	updated, req, _ := m.Update(clickCenter(t, zm, zones.PluginRow(1)))
+	if req != nil {
+		t.Fatalf("unexpected request %#v", req)
+	}
+	if updated.sel.Index != 1 {
+		t.Fatalf("sel.Index = %d, want 1 after row click", updated.sel.Index)
+	}
+
+	_ = zm.Scan(updated.View())
+	updated, req, _ = updated.Update(clickCenter(t, zm, zones.PluginModeBrowse))
+	if req != nil {
+		t.Fatalf("unexpected request %#v", req)
+	}
+	if updated.mode != modeBrowse {
+		t.Fatal("expected modeBrowse after clicking Browse")
+	}
+	if updated.sel.Index != 0 {
+		t.Fatalf("sel.Index = %d, want 0 after mode switch", updated.sel.Index)
+	}
+
+	_ = zm.Scan(updated.View())
+	updated, req, _ = updated.Update(clickCenter(t, zm, zones.PluginRow(1)))
+	if req != nil {
+		t.Fatalf("unexpected request %#v", req)
+	}
+	if updated.sel.Index != 1 {
+		t.Fatalf("sel.Index = %d, want 1 after browse row click", updated.sel.Index)
+	}
+
+	_ = zm.Scan(updated.View())
+	updated, req, _ = updated.Update(clickCenter(t, zm, zones.PluginModeInstalled))
+	if req != nil {
+		t.Fatalf("unexpected request %#v", req)
+	}
+	if updated.mode != modeInstalled {
+		t.Fatal("expected modeInstalled after clicking Installed")
+	}
+}
+
+func TestUpdate_MouseBrowseEmptyFetchesRegistry(t *testing.T) {
+	zm := zone.New()
+	m := NewModel(zm)
+	m.SetDimensions(120, 40)
+
+	_ = zm.Scan(m.View())
+	updated, req, cmd := m.Update(clickCenter(t, zm, zones.PluginModeBrowse))
+	if req == nil || !req.FetchRegistry {
+		t.Fatalf("expected FetchRegistry request, got %#v", req)
+	}
+	if !updated.loading || cmd == nil {
+		t.Error("expected loading with spinner cmd")
+	}
+}
+
+func clickCenter(t *testing.T, zm *zone.Manager, zoneID string) tea.MouseClickMsg {
+	t.Helper()
+	// Scan sends zone info to an async worker; Get may return nil briefly.
+	var z *zone.ZoneInfo
+	for i := 0; i < 50; i++ {
+		z = zm.Get(zoneID)
+		if z != nil && !z.IsZero() {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if z == nil || z.IsZero() {
+		t.Fatalf("zone %q not found after Scan", zoneID)
+	}
+	return tea.MouseClickMsg{
+		Button: tea.MouseLeft,
+		X:      (z.StartX + z.EndX) / 2,
+		Y:      (z.StartY + z.EndY) / 2,
 	}
 }
 
