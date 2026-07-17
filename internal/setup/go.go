@@ -3,12 +3,13 @@
 // Stack-specific setup (rules, workflows, and verification tools for a given
 // language) is handled by plugins — see internal/plugin and plugins/.
 // This package contains the utilities that remain useful regardless of stack:
-//   - SetProject: bulk-update working_dir on executable tool entries
+//   - SetProject: restore/update working_dir on executable tool entries
 //   - ContinueConfig: generate a .continue/config.yaml for this server
 //   - ResolveDir: expand ~ and make a path absolute
 package setup
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,17 +18,28 @@ import (
 	"github.com/madicen/naitv-mcp/internal/store"
 	"github.com/madicen/naitv-mcp/internal/tools"
 	"github.com/madicen/naitv-mcp/internal/xpath"
+	"github.com/madicen/naitv-mcp/pkg/entry"
 )
+
+// ProjectRootPlaceholder is the working_dir template for tools that take a
+// project_root parameter. Agents pass the path per call; set_project must not
+// replace this with a baked absolute path.
+const ProjectRootPlaceholder = "{project_root}"
 
 // SetProjectResult summarises what SetProject changed.
 type SetProjectResult struct {
-	Updated []string // tool names whose working_dir was updated
-	Skipped []string // tool names already pointing at the right directory
+	Updated []string // tool names whose working_dir (or lint flag) was updated
+	Skipped []string // tool names already correct
 }
 
-// SetProject bulk-updates the working_dir field on all active executable tool
-// entries. This is a direct write (not a proposal) because it is low-risk and
-// the user explicitly requested it through the agent.
+// SetProject updates executable tool entries for the given project.
+//
+// Tools that declare a project_root parameter keep working_dir="{project_root}"
+// so each build/vet/test call can target any repo. Other tools get working_dir
+// set to the absolute projectDir. Optionally toggles the lint tool's disabled flag.
+//
+// This is a direct write (not a proposal) because it is low-risk and the user
+// explicitly requested it through the agent.
 func SetProject(st *store.Store, projectDir string, enableLint, disableLint bool) (SetProjectResult, error) {
 	entries, err := st.List("tool", nil)
 	if err != nil {
@@ -43,9 +55,14 @@ func SetProject(st *store.Store, projectDir string, enableLint, disableLint bool
 			e.Fields = map[string]string{}
 		}
 
+		targetDir := projectDir
+		if usesProjectRootParam(e) {
+			targetDir = ProjectRootPlaceholder
+		}
+
 		changed := false
-		if e.Fields["working_dir"] != projectDir {
-			e.Fields["working_dir"] = projectDir
+		if e.Fields["working_dir"] != targetDir {
+			e.Fields["working_dir"] = targetDir
 			changed = true
 		}
 		if e.Name == "lint" {
@@ -68,6 +85,28 @@ func SetProject(st *store.Store, projectDir string, enableLint, disableLint bool
 		result.Updated = append(result.Updated, e.Name)
 	}
 	return result, nil
+}
+
+// usesProjectRootParam reports whether the tool expects a project_root argument
+// (loop-engineering-go style) rather than a baked absolute working_dir.
+func usesProjectRootParam(e entry.Entry) bool {
+	if strings.Contains(e.Fields["working_dir"], ProjectRootPlaceholder) {
+		return true
+	}
+	raw := strings.TrimSpace(e.Fields["params"])
+	if raw == "" {
+		return false
+	}
+	var params []tools.Param
+	if err := json.Unmarshal([]byte(raw), &params); err != nil {
+		return strings.Contains(raw, `"name":"project_root"`) || strings.Contains(raw, `"name": "project_root"`)
+	}
+	for _, p := range params {
+		if p.Name == "project_root" {
+			return true
+		}
+	}
+	return false
 }
 
 // ContinueConfig generates the text of a .continue/config.yaml file wired to

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
@@ -336,7 +337,15 @@ func TestUpdate_MouseBrowseEmptyFetchesRegistry(t *testing.T) {
 
 func clickCenter(t *testing.T, zm *zone.Manager, zoneID string) tea.MouseClickMsg {
 	t.Helper()
-	z := zm.Get(zoneID)
+	// Scan sends zone info to an async worker; Get may return nil briefly.
+	var z *zone.ZoneInfo
+	for i := 0; i < 50; i++ {
+		z = zm.Get(zoneID)
+		if z != nil && !z.IsZero() {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
 	if z == nil || z.IsZero() {
 		t.Fatalf("zone %q not found after Scan", zoneID)
 	}

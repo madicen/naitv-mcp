@@ -66,8 +66,10 @@ The agent will:
    from the naitv-plugins registry and proposes all loop-engineering entries
    (rules, workflows, and verification tools) as pending entries in naitv-mcp.
 
-2. Call `set_project(project_dir="~/dev/myproject")` — updates `working_dir`
-   on all executable tool entries so they run inside your project.
+2. Call `set_project(project_dir="~/dev/myproject")` — restores
+   `working_dir={project_root}` on loop-engineering tools (pass the path on
+   each build/vet/test call) and sets absolute `working_dir` on any other
+   executable tools.
 
 3. Call `generate_continue_config()` — returns a complete `.continue/config.yaml`
    pre-populated with the binary path and the list of tools in your store.
@@ -140,8 +142,9 @@ If you move the project or set up a new one, ask the agent:
 Update naitv-mcp to point all verification tools at ~/dev/newproject.
 ```
 
-The agent calls `set_project(project_dir="~/dev/newproject")` and reports what
-changed. Restart `naitv-mcp serve` to apply.
+The agent calls `set_project(project_dir="~/dev/newproject")`. For
+loop-engineering tools this restores `working_dir={project_root}` (the path
+is passed on each build/vet/test call). Restart `naitv-mcp serve` to apply.
 
 ---
 
@@ -182,7 +185,7 @@ The agent calls `set_project(project_dir=".", enable_lint="true")`. Restart
 ### Project setup (agent-callable)
 | Tool | Description |
 |------|-------------|
-| `set_project` | Update `working_dir` on all executable tools; optionally enable lint |
+| `set_project` | Restore `working_dir={project_root}` on parameterized tools; set absolute dir on others; optionally enable lint |
 | `generate_continue_config` | Return a ready-to-use `.continue/config.yaml` as text |
 
 ### Verification (Go — registered after approving loop-engineering-go plugin entries)
