@@ -177,7 +177,7 @@ naitv-mcp seed-demo    # idempotent; populates the default DB if empty
 
 Write tools never modify active data directly — they always create a proposal you approve in the TUI.
 
-**Dynamic executable tools:** any active `kind=tool` entry with an `exec` field is also registered as an MCP tool (named after the entry). Agents can call these after you approve them in the Review tab; the server hot-reloads tools automatically and emits `tools/list_changed` — no restart needed.
+**Dynamic executable tools:** any active `kind=tool` entry with an `exec` field is also registered as an MCP tool (named after the entry). Agents can call these after you approve them in the Review tab; the server hot-reloads tools automatically and emits `tools/list_changed` — no restart needed. Set `io_mode=json` for structured stdin/stdout JSON scripts (see [docs/TOOLS.md](docs/TOOLS.md)).
 
 ## Keyboard reference
 
