@@ -160,8 +160,33 @@ func TestRunJSON_NonZeroExit(t *testing.T) {
 	if !strings.Contains(got.Stderr, "boom") {
 		t.Fatalf("stderr = %q", got.Stderr)
 	}
-	if !strings.Contains(got.Format(), "exit code: 2") {
-		t.Fatalf("Format = %q", got.Format())
+	var errObj map[string]any
+	if err := json.Unmarshal([]byte(got.Format()), &errObj); err != nil {
+		t.Fatalf("Format should be JSON error: %v (%q)", err, got.Format())
+	}
+	if errObj["ok"] != false {
+		t.Fatalf("ok = %#v", errObj["ok"])
+	}
+	if int(errObj["exit_code"].(float64)) != 2 {
+		t.Fatalf("exit_code = %#v", errObj["exit_code"])
+	}
+}
+
+func TestRunJSON_OverheadUnder200ms(t *testing.T) {
+	def := Def{
+		Name:    "ping",
+		Exec:    `echo '{"pong":true}'`,
+		IOMode:  IOModeJSON,
+		Timeout: 5 * time.Second,
+	}
+	// Warm once, then measure steady-state host overhead (spawn + JSON validate).
+	_ = RunJSON(context.Background(), def, map[string]any{})
+	got := RunJSON(context.Background(), def, map[string]any{})
+	if got.Error != "" || got.ExitCode != 0 {
+		t.Fatalf("run failed: %#v", got)
+	}
+	if got.Duration > 200*time.Millisecond {
+		t.Fatalf("JSON I/O call took %s (want <= 200ms overhead budget for trivial tool)", got.Duration)
 	}
 }
 
