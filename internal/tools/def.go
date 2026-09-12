@@ -19,11 +19,15 @@
 //	  exec:        go test ./...
 //	  working_dir: ~/dev/myproject   (optional; ~ is expanded)
 //	  timeout:     60s               (optional; default 30s)
+//	  io_mode:     text|json         (optional; default text)
 //	  params:      [{"name":"pkg","description":"Package path","required":false}]
 //	  disabled:    false             (optional; set "true" to temporarily disable)
 //
 // The "exec" value is a shell command template. Embed {param_name} placeholders
 // for each entry in "params"; the model supplies values when it calls the tool.
+//
+// When io_mode is "json", arguments are marshaled as one JSON object line on
+// stdin and stdout must be one JSON value (see docs/TOOLS.md).
 //
 // # Agent proposals
 //
@@ -41,6 +45,15 @@ import (
 	"unicode"
 
 	"github.com/madicen/naitv-mcp/pkg/entry"
+)
+
+// I/O modes for executable tools.
+const (
+	// IOModeText is the default: stdout/stderr are returned as raw text.
+	IOModeText = "text"
+	// IOModeJSON marshals tool arguments as a JSON object on stdin (one line)
+	// and expects a single JSON value on stdout.
+	IOModeJSON = "json"
 )
 
 // Param describes a single named parameter for an executable tool.
@@ -75,6 +88,15 @@ type Def struct {
 	// EnvAllowlist lists environment variable names passed to the subprocess.
 	// When empty, defaults to PATH and HOME only.
 	EnvAllowlist []string
+	// IOMode selects how arguments and output are exchanged with the subprocess.
+	// "" and "text" keep the historical raw-stdout behavior; "json" uses the
+	// stdin/stdout JSON contract documented in docs/TOOLS.md.
+	IOMode string
+}
+
+// IsJSON reports whether this tool uses JSON stdin/stdout I/O.
+func (d Def) IsJSON() bool {
+	return strings.EqualFold(d.IOMode, IOModeJSON)
 }
 
 // IsExecutable reports whether the entry should be treated as an executable
@@ -134,6 +156,19 @@ func ParseDef(e entry.Entry) (Def, error) {
 				d.EnvAllowlist = append(d.EnvAllowlist, key)
 			}
 		}
+	}
+
+	mode := strings.TrimSpace(e.Fields["io_mode"])
+	if mode == "" {
+		mode = strings.TrimSpace(e.Fields["ioMode"]) // lazy: accept camelCase alias
+	}
+	switch strings.ToLower(mode) {
+	case "", IOModeText:
+		d.IOMode = IOModeText
+	case IOModeJSON:
+		d.IOMode = IOModeJSON
+	default:
+		return Def{}, fmt.Errorf("entry %q: invalid io_mode %q (want %q or %q)", e.Name, mode, IOModeText, IOModeJSON)
 	}
 
 	return d, nil

@@ -3,6 +3,7 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,21 +19,66 @@ type Result struct {
 	Stderr   string
 	ExitCode int
 	Duration time.Duration
-	// Error is non-empty when the process could not be started or timed out.
+	// Error is non-empty when the process could not be started or timed out,
+	// or when JSON I/O validation fails.
 	// It is distinct from a non-zero exit code — both may occur together.
 	Error string
+	// IOMode is the mode used for this run (text or json). Set by Run/RunJSON.
+	IOMode string
 }
 
-// Run executes a Def with the given arguments and returns the output.
-// args maps placeholder names to their values (e.g. {"file": "main.go"}).
+// Run executes a Def with string arguments (for {param} interpolation).
+// When def.IOMode is json, args are also marshaled as a JSON object on stdin.
 // The provided context is respected for cancellation; the Def's Timeout
 // is applied as an additional hard deadline.
 func Run(ctx context.Context, def Def, args map[string]string) Result {
-	if def.Disabled {
-		return Result{Error: fmt.Sprintf("tool %q is disabled", def.Name)}
+	var jsonArgs map[string]any
+	if def.IsJSON() {
+		jsonArgs = make(map[string]any, len(args))
+		for k, v := range args {
+			jsonArgs[k] = v
+		}
+	}
+	return execute(ctx, def, args, jsonArgs)
+}
+
+// RunJSON executes a Def in JSON I/O mode with a full argument object.
+// Prefer this when the MCP client supplies non-string JSON values.
+// String placeholders in exec/working_dir are filled from string-valued args
+// (non-strings are JSON-encoded for interpolation only).
+func RunJSON(ctx context.Context, def Def, args map[string]any) Result {
+	if !def.IsJSON() {
+		def.IOMode = IOModeJSON
+	}
+	strArgs := make(map[string]string, len(args))
+	for k, v := range args {
+		switch t := v.(type) {
+		case string:
+			strArgs[k] = t
+		case nil:
+			strArgs[k] = ""
+		default:
+			b, err := json.Marshal(t)
+			if err != nil {
+				return Result{IOMode: IOModeJSON, Error: fmt.Sprintf("marshal arg %q: %v", k, err)}
+			}
+			strArgs[k] = string(b)
+		}
+	}
+	return execute(ctx, def, strArgs, args)
+}
+
+func execute(ctx context.Context, def Def, strArgs map[string]string, jsonArgs map[string]any) Result {
+	mode := def.IOMode
+	if mode == "" {
+		mode = IOModeText
 	}
 
-	cmdStr := interpolate(def.Exec, args)
+	if def.Disabled {
+		return Result{IOMode: mode, Error: fmt.Sprintf("tool %q is disabled", def.Name)}
+	}
+
+	cmdStr := interpolate(def.Exec, strArgs)
 
 	tctx, cancel := context.WithTimeout(ctx, def.Timeout)
 	defer cancel()
@@ -43,12 +89,26 @@ func Run(ctx context.Context, def Def, args map[string]string) Result {
 	// Interpolate working_dir from runtime args (e.g. {project_root}) then
 	// expand ~. If placeholders remain unresolved (agent didn't pass the param),
 	// fall back to empty string so the process inherits the server's CWD.
-	workDir := interpolate(def.WorkingDir, args)
+	workDir := interpolate(def.WorkingDir, strArgs)
 	if strings.Contains(workDir, "{") {
 		workDir = "" // unresolved placeholder — use server CWD
 	}
 	if workDir != "" {
 		c.Dir = xpath.ExpandHome(workDir)
+	}
+
+	if def.IsJSON() {
+		var payload []byte
+		if jsonArgs == nil {
+			payload = []byte("{}")
+		} else {
+			var err error
+			payload, err = json.Marshal(jsonArgs)
+			if err != nil {
+				return Result{IOMode: mode, Error: fmt.Sprintf("marshal JSON stdin: %v", err)}
+			}
+		}
+		c.Stdin = bytes.NewReader(append(payload, '\n'))
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -63,6 +123,7 @@ func Run(ctx context.Context, def Def, args map[string]string) Result {
 		Stdout:   stdout.String(),
 		Stderr:   stderr.String(),
 		Duration: dur,
+		IOMode:   mode,
 	}
 
 	if runErr != nil {
@@ -76,12 +137,28 @@ func Run(ctx context.Context, def Def, args map[string]string) Result {
 		}
 	}
 
+	if def.IsJSON() && r.Error == "" && r.ExitCode == 0 {
+		trimmed := bytes.TrimSpace(stdout.Bytes())
+		if len(trimmed) == 0 {
+			r.Error = "json io: stdout is empty (expected a JSON value)"
+		} else if !json.Valid(trimmed) {
+			r.Error = "json io: stdout is not valid JSON"
+		} else {
+			r.Stdout = string(trimmed)
+		}
+	}
+
 	return r
 }
 
 // Format returns a human-readable summary of the result, suitable for
-// returning to the model as tool output.
+// returning to the model as tool output. In JSON mode on success, returns
+// the JSON stdout only (no timing footer).
 func (r Result) Format() string {
+	if strings.EqualFold(r.IOMode, IOModeJSON) {
+		return r.formatJSON()
+	}
+
 	var sb strings.Builder
 
 	if r.Error != "" {
@@ -108,6 +185,34 @@ func (r Result) Format() string {
 	}
 
 	fmt.Fprintf(&sb, "\n(completed in %s)", r.Duration.Round(time.Millisecond))
+	return sb.String()
+}
+
+func (r Result) formatJSON() string {
+	if r.Error == "" && r.ExitCode == 0 {
+		return r.Stdout
+	}
+
+	var sb strings.Builder
+	if r.Error != "" {
+		fmt.Fprintf(&sb, "⚠ error: %s\n", r.Error)
+	}
+	if r.Stderr != "" {
+		sb.WriteString(r.Stderr)
+		if !strings.HasSuffix(r.Stderr, "\n") {
+			sb.WriteString("\n")
+		}
+	}
+	if r.Stdout != "" {
+		sb.WriteString(r.Stdout)
+		if !strings.HasSuffix(r.Stdout, "\n") {
+			sb.WriteString("\n")
+		}
+	}
+	if r.ExitCode != 0 {
+		fmt.Fprintf(&sb, "exit code: %d\n", r.ExitCode)
+	}
+	fmt.Fprintf(&sb, "(completed in %s)", r.Duration.Round(time.Millisecond))
 	return sb.String()
 }
 

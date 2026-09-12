@@ -460,20 +460,35 @@ func registerOne(s *sdkmcp.Server, def tools.Def) {
 
 	captured := def
 	s.AddTool(tool, func(ctx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
-		args := make(map[string]string, len(captured.Params))
 		var raw map[string]any
 		if len(req.Params.Arguments) > 0 {
 			_ = json.Unmarshal(req.Params.Arguments, &raw)
 		}
-		for _, p := range captured.Params {
-			if v, ok := raw[p.Name].(string); ok {
-				args[p.Name] = v
+
+		var result tools.Result
+		if captured.IsJSON() {
+			if raw == nil {
+				raw = map[string]any{}
 			}
+			result = tools.RunJSON(ctx, captured, raw)
+		} else {
+			args := make(map[string]string, len(captured.Params))
+			for _, p := range captured.Params {
+				if v, ok := raw[p.Name].(string); ok {
+					args[p.Name] = v
+				}
+			}
+			result = tools.Run(ctx, captured, args)
 		}
-		result := tools.Run(ctx, captured, args)
-		return &sdkmcp.CallToolResult{
+		out := &sdkmcp.CallToolResult{
 			Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: result.Format()}},
-		}, nil
+		}
+		// Text mode: non-zero exit is often expected (e.g. failing tests).
+		// JSON mode: treat process failure as a tool error.
+		if result.Error != "" || (captured.IsJSON() && result.ExitCode != 0) {
+			out.IsError = true
+		}
+		return out, nil
 	})
 }
 
