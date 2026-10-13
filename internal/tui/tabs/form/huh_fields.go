@@ -11,49 +11,60 @@ import (
 	"github.com/madicen/naitv-mcp/pkg/entry"
 )
 
+const (
+	focusName  = 1
+	focusGroup = 2
+	focusTags  = 3
+	focusBody  = 4
+	huhFieldN  = 4 // name, group, tags, body
+)
+
 type huhFields struct {
-	name string
+	name  string
 	group string
-	tags string
-	body string
+	tags  string
+	body  string
 }
 
 func (m *Model) rebuildHuhForm() {
-	fields := &m.huhVals
+	if m.huhVals == nil {
+		m.huhVals = &huhFields{}
+	}
+	fields := m.huhVals
+	m.huhName = huh.NewInput().
+		Key("name").
+		Title("Name").
+		Placeholder("name").
+		CharLimit(200).
+		Value(&fields.name).
+		Validate(func(s string) error {
+			if strings.TrimSpace(s) == "" {
+				return fmt.Errorf("name is required")
+			}
+			return nil
+		})
+	m.huhGroup = huh.NewInput().
+		Key("group").
+		Title("Group").
+		Placeholder("group (optional)").
+		CharLimit(100).
+		Value(&fields.group)
+	m.huhTags = huh.NewInput().
+		Key("tags").
+		Title("Tags").
+		Placeholder("tags (comma-separated)").
+		CharLimit(500).
+		Value(&fields.tags)
+	m.huhBody = huh.NewText().
+		Key("body").
+		Title("Body").
+		Placeholder("body / description").
+		CharLimit(5000).
+		Lines(4).
+		Value(&fields.body)
+
 	m.huhForm = huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().
-				Key("name").
-				Title("Name").
-				Placeholder("name").
-				CharLimit(200).
-				Value(&fields.name).
-				Validate(func(s string) error {
-					if strings.TrimSpace(s) == "" {
-						return fmt.Errorf("name is required")
-					}
-					return nil
-				}),
-			huh.NewInput().
-				Key("group").
-				Title("Group").
-				Placeholder("group (optional)").
-				CharLimit(100).
-				Value(&fields.group),
-			huh.NewInput().
-				Key("tags").
-				Title("Tags").
-				Placeholder("tags (comma-separated)").
-				CharLimit(500).
-				Value(&fields.tags),
-			huh.NewText().
-				Key("body").
-				Title("Body").
-				Placeholder("body / description").
-				CharLimit(5000).
-				Lines(4).
-				Value(&fields.body),
-		),
+		huh.NewGroup(m.huhName, m.huhGroup, m.huhTags, m.huhBody),
 	).WithTheme(naitvTheme{}).WithShowHelp(false)
 	if m.width > 0 {
 		formW := m.width * 60 / 100
@@ -68,6 +79,9 @@ func (m *Model) rebuildHuhForm() {
 }
 
 func (m *Model) syncHuhFromEntry(e entry.Entry) {
+	if m.huhVals == nil {
+		m.huhVals = &huhFields{}
+	}
 	m.huhVals.name = e.Name
 	m.huhVals.group = e.Group
 	m.huhVals.tags = strings.Join(e.Tags, ", ")
@@ -76,11 +90,38 @@ func (m *Model) syncHuhFromEntry(e entry.Entry) {
 }
 
 func (m *Model) clearHuhFields() {
-	m.huhVals = huhFields{}
+	if m.huhVals == nil {
+		m.huhVals = &huhFields{}
+	} else {
+		*m.huhVals = huhFields{}
+	}
 	m.rebuildHuhForm()
 }
 
-// activateHuh runs huh init synchronously so key input works immediately.
+func (m *Model) huhField(idx int) huh.Field {
+	switch idx {
+	case focusName:
+		return m.huhName
+	case focusGroup:
+		return m.huhGroup
+	case focusTags:
+		return m.huhTags
+	case focusBody:
+		return m.huhBody
+	default:
+		return nil
+	}
+}
+
+func (m *Model) blurHuh() {
+	for _, f := range []huh.Field{m.huhName, m.huhGroup, m.huhTags, m.huhBody} {
+		if f != nil {
+			f.Blur()
+		}
+	}
+}
+
+// activateHuh runs huh init synchronously so fields are sized and themed.
 func (m *Model) activateHuh() {
 	if m.huhForm == nil {
 		return
@@ -107,12 +148,34 @@ func (m *Model) activateHuh() {
 	}
 }
 
+// ensureHuhReady builds huh field state after rebuild. The root model swallows
+// tea.WindowSizeMsg after SetDimensions, so without Init the fields stay empty.
+func (m *Model) ensureHuhReady() {
+	if m.huhForm == nil {
+		return
+	}
+	m.activateHuh()
+	m.blurHuh()
+}
+
 // naitvTheme maps huh styles to the shared TUI theme colors.
 type naitvTheme struct{}
 
 func (naitvTheme) Theme(_ bool) *huh.Styles {
 	s := huh.ThemeCharm(false)
-	s.Focused.Title = s.Focused.Title.Foreground(lipgloss.Color(theme.Accent))
-	s.Blurred.Title = s.Blurred.Title.Foreground(lipgloss.Color(theme.Dim))
+	text := lipgloss.Color(theme.Text)
+	accent := lipgloss.Color(theme.Accent)
+	// theme.Dim (240) is invisible on the dark background — Kind uses Text.
+	s.Focused.Title = s.Focused.Title.Foreground(accent)
+	s.Blurred.Title = s.Blurred.Title.Foreground(text)
+	s.Focused.Base = s.Focused.Base.BorderForeground(accent)
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("248"))
+	value := lipgloss.NewStyle().Foreground(text)
+	s.Focused.TextInput.Placeholder = hint
+	s.Blurred.TextInput.Placeholder = hint
+	s.Focused.TextInput.Text = value
+	s.Blurred.TextInput.Text = value
+	s.Focused.TextInput.Prompt = lipgloss.NewStyle().Foreground(accent)
+	s.Blurred.TextInput.Prompt = lipgloss.NewStyle().Foreground(text)
 	return s
 }
