@@ -436,6 +436,51 @@ func TestServer_ToolListChangedAfterApproval(t *testing.T) {
 	}
 }
 
+func TestServer_JSONIOToolEndToEnd(t *testing.T) {
+	st := openTestStore(t)
+	if _, err := st.Create(entry.Entry{
+		Kind: "tool",
+		Name: "json-echo",
+		Body: "Echo JSON args via stdin/stdout",
+		Fields: map[string]string{
+			"exec": `python3 -c 'import json,sys; d=json.load(sys.stdin); print(json.dumps({"echo": d}))'`,
+			"io_mode": "json",
+			"timeout": "10s",
+			"params":  `[{"name":"msg","description":"message","required":true}]`,
+		},
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	session, ctx := connectTestClient(t, st)
+
+	listed, err := session.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if !containsAll(toolNames(listed.Tools), "json_echo") {
+		t.Fatalf("json_echo not discoverable: %v", toolNames(listed.Tools))
+	}
+
+	res, err := session.CallTool(ctx, &sdkmcp.CallToolParams{
+		Name:      "json_echo",
+		Arguments: map[string]any{"msg": "hi", "n": 1},
+	})
+	if err != nil {
+		t.Fatalf("CallTool: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %#v", res)
+	}
+	text := res.Content[0].(*sdkmcp.TextContent).Text
+	if !contains(text, `"msg":"hi"`) && !contains(text, `"msg": "hi"`) {
+		t.Fatalf("JSON echo missing msg: %q", text)
+	}
+	if !contains(text, `"echo"`) {
+		t.Fatalf("JSON echo missing echo wrapper: %q", text)
+	}
+}
+
 func toolNames(tools []*sdkmcp.Tool) []string {
 	names := make([]string, len(tools))
 	for i, tool := range tools {

@@ -37,7 +37,11 @@ Exit:   0 = success, non-zero = error
 
 On success the MCP tool returns **only** the JSON stdout (no timing footer).
 On failure (timeout, spawn error, non-zero exit, or invalid JSON stdout) the
-result is marked as an error and includes stderr when present.
+result is marked as an error and the body is a JSON object:
+
+```json
+{"ok":false,"exit_code":2,"error":"...","stderr":"..."}
+```
 
 Example entry fields:
 

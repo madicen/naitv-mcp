@@ -193,27 +193,25 @@ func (r Result) formatJSON() string {
 		return r.Stdout
 	}
 
-	var sb strings.Builder
+	// Model-friendly: errors are JSON objects when possible.
+	payload := map[string]any{
+		"ok":        false,
+		"exit_code": r.ExitCode,
+	}
 	if r.Error != "" {
-		fmt.Fprintf(&sb, "⚠ error: %s\n", r.Error)
+		payload["error"] = r.Error
 	}
-	if r.Stderr != "" {
-		sb.WriteString(r.Stderr)
-		if !strings.HasSuffix(r.Stderr, "\n") {
-			sb.WriteString("\n")
-		}
+	if s := strings.TrimSpace(r.Stderr); s != "" {
+		payload["stderr"] = s
 	}
-	if r.Stdout != "" {
-		sb.WriteString(r.Stdout)
-		if !strings.HasSuffix(r.Stdout, "\n") {
-			sb.WriteString("\n")
-		}
+	if s := strings.TrimSpace(r.Stdout); s != "" {
+		payload["stdout"] = s
 	}
-	if r.ExitCode != 0 {
-		fmt.Fprintf(&sb, "exit code: %d\n", r.ExitCode)
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprintf(`{"ok":false,"error":%q}`, r.Error)
 	}
-	fmt.Fprintf(&sb, "(completed in %s)", r.Duration.Round(time.Millisecond))
-	return sb.String()
+	return string(b)
 }
 
 // interpolate replaces {name} placeholders in template with values from args.
