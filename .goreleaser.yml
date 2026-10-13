@@ -72,13 +72,28 @@ homebrew_casks:
     license: "MIT"
     binaries:
       - naitv-mcp
-    # Unsigned GitHub release binaries are quarantined on macOS; strip the
-    # attribute on install so the cask runs without manual xattr steps.
+    # Unsigned GitHub release binaries are quarantined on macOS. Quarantine
+    # alone is not enough on recent macOS: Gatekeeper SIGKILLs the
+    # linker/ad-hoc signature (Code Signature Invalid). Strip quarantine and
+    # re-sign ad-hoc on the install machine so brew users can run the binary.
+    # Proper fix later: Apple Developer ID + notarization.
+    caveats: |
+      On macOS, if Gatekeeper blocks a GitHub/direct download ("Not Opened" /
+      Code Signature Invalid), clear quarantine and re-sign ad-hoc:
+
+        xattr -dr com.apple.quarantine "$(which naitv-mcp)"
+        codesign --force --sign - "$(which naitv-mcp)"
+
+      Or use System Settings → Privacy & Security → Open Anyway.
+      Prefer `brew install --cask madicen/tap/naitv-mcp` (cask preflight handles this).
+    # Must be preflight (not postflight): generate_completions_from_executable
+    # runs the binary before postflight, and Gatekeeper SIGKILLs it first.
     hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/naitv-mcp"]
+      pre:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/naitv-mcp"]
+            run "/usr/bin/codesign", args: ["--force", "--sign", "-", "{{ .StagedPath }}/naitv-mcp"]
           end
     generate_completions_from_executable:
       executable: "naitv-mcp"

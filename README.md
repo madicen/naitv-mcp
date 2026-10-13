@@ -90,11 +90,17 @@ Agent writes land as `pending` proposals. Approve (`a`), reject (`r`), edit-befo
 brew install --cask madicen/tap/naitv-mcp
 ```
 
+The cask preflight strips Gatekeeper quarantine and re-signs the binary
+ad-hoc on macOS (release binaries are not Apple-notarized yet).
+
 ### Go install
 
 ```bash
 go install github.com/madicen/naitv-mcp/cmd/naitv-mcp@latest
 ```
+
+Local `go install` / `go build` binaries are not quarantined and usually run
+without extra steps.
 
 ### Build from source
 
@@ -103,6 +109,18 @@ go install github.com/madicen/naitv-mcp/cmd/naitv-mcp@latest
 # or:
 make build        # → bin/naitv-mcp
 ```
+
+### macOS: Gatekeeper / “Not Opened”
+
+If a GitHub release download is blocked (“Apple could not verify…”, exit 137,
+or `Code Signature Invalid`), either prefer Homebrew above, or:
+
+```bash
+xattr -dr com.apple.quarantine /path/to/naitv-mcp
+codesign --force --sign - /path/to/naitv-mcp
+```
+
+You can also use **System Settings → Privacy & Security → Open Anyway**.
 
 ## Usage
 
