@@ -65,15 +65,30 @@ func (m *Model) View() string {
 		lines = append(lines, renderField("Kind", m.kind.View(), m.focusIdx == 0, formW))
 	}
 
-	if m.huhForm != nil {
-		lines = append(lines, m.huhForm.View())
+	// Render each huh field separately so Tab/click can target them. Remap
+	// ANSI 240 → 248: huh copies placeholder color onto the focused style only.
+	paint := func(zoneID, view string) string {
+		return m.zoneManager.Mark(zoneID, strings.ReplaceAll(view, "38;5;240", "38;5;248"))
+	}
+	if m.huhName != nil {
+		lines = append(lines, paint(zones.FormName, m.huhName.View()))
+	}
+	if m.huhGroup != nil {
+		lines = append(lines, paint(zones.FormGroup, m.huhGroup.View()))
+	}
+	if m.huhTags != nil {
+		lines = append(lines, paint(zones.FormTags, m.huhTags.View()))
+	}
+	if m.huhBody != nil {
+		lines = append(lines, paint(zones.FormBody, m.huhBody.View()))
 	}
 
 	if len(m.fields) > 0 {
 		lines = append(lines, theme.FormDimLabel.Render("Custom Fields:"))
+		base := m.customFieldBase()
 		for i, fp := range m.fields {
-			keyFocused := m.focusIdx == 2+i*2
-			valFocused := m.focusIdx == 2+i*2+1
+			keyFocused := m.focusIdx == base+i*2
+			valFocused := m.focusIdx == base+i*2+1
 
 			keyView := fp.Key.View()
 			valView := fp.Val.View()

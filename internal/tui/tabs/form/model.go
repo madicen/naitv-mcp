@@ -43,11 +43,11 @@ type CancelMsg struct{}
 
 // Model holds the form state.
 type Model struct {
-	mode          Mode
-	visible       bool
-	focusIdx      int
-	kind          textinput.Model
-	fields        []FieldPair
+	mode     Mode
+	visible  bool
+	focusIdx int
+	kind     textinput.Model
+	fields   []FieldPair
 	// Pass-through fields: not exposed in the form UI but must survive
 	// PopulateFrom → ToEntry so store.Update doesn't zero them out.
 	sourceID         string
@@ -57,8 +57,8 @@ type Model struct {
 	sourceTargetID   string
 	proposalID       string
 	delivery         entry.Delivery
-	width, height int
-	zoneManager   *zone.Manager
+	width, height    int
+	zoneManager      *zone.Manager
 
 	// Kind selection: kindDD is a dropdown of existing kinds plus a
 	// "+ New kind…" sentinel. When newKindMode is set the kind textinput is
@@ -70,7 +70,13 @@ type Model struct {
 	newKindMode bool
 	keys        keymap.Form
 	huhForm     *huh.Form
-	huhVals     huhFields
+	// huhVals is heap-backed so huh field accessors stay valid across
+	// value-receiver Update copies of Model.
+	huhVals  *huhFields
+	huhName  *huh.Input
+	huhGroup *huh.Input
+	huhTags  *huh.Input
+	huhBody  *huh.Text
 	// kindDDRow is the content-line index of the trigger within the form panel
 	// body; lastFormView is the most recent rendered panel. Both are set in
 	// View and consumed by ComposeDropdownOverlay.
@@ -79,14 +85,15 @@ type Model struct {
 }
 
 // fieldCount returns the total number of focusable items.
-// Indices: 0=kind, 1=huh fields, 2..2+len*2-1=custom fields, addField, save, cancel
+// Indices: 0=kind, 1=name, 2=group, 3=tags, 4=body, then custom key/val pairs, addField, save, cancel
 func (m *Model) fieldCount() int {
-	return 2 + len(m.fields)*2 + 1 + 2
+	return 1 + huhFieldN + len(m.fields)*2 + 1 + 2
 }
 
-func (m *Model) focusIdxAddField() int { return 2 + len(m.fields)*2 }
+func (m *Model) focusIdxAddField() int { return 1 + huhFieldN + len(m.fields)*2 }
 func (m *Model) focusIdxSave() int     { return m.focusIdxAddField() + 1 }
 func (m *Model) focusIdxCancel() int   { return m.focusIdxSave() + 1 }
+func (m *Model) customFieldBase() int  { return 1 + huhFieldN }
 
 // NewModel creates a new form Model.
 func NewModel(zm *zone.Manager) Model {
@@ -98,6 +105,7 @@ func NewModel(zm *zone.Manager) Model {
 		kind:        kind,
 		zoneManager: zm,
 		keys:        keymap.DefaultForm,
+		huhVals:     &huhFields{},
 	}
 	// Start with an empty kind dropdown (only the sentinel); SetKinds rebuilds
 	// it with the real kind set whenever the form is opened.
@@ -114,6 +122,7 @@ func (m *Model) Visible() bool { return m.visible }
 func (m *Model) Show() {
 	m.visible = true
 	m.focusIdx = 0
+	m.ensureHuhReady()
 	m.applyFocus()
 }
 
@@ -177,12 +186,16 @@ func (m *Model) Reset() {
 
 // ToEntry converts the form fields into an Entry.
 func (m *Model) ToEntry() entry.Entry {
+	vals := m.huhVals
+	if vals == nil {
+		vals = &huhFields{}
+	}
 	e := entry.Entry{
 		ID:         m.sourceID,
 		Kind:       m.selectedKind(),
-		Name:       strings.TrimSpace(m.huhVals.name),
-		Group:      strings.TrimSpace(m.huhVals.group),
-		Body:       strings.TrimSpace(m.huhVals.body),
+		Name:       strings.TrimSpace(vals.name),
+		Group:      strings.TrimSpace(vals.group),
+		Body:       strings.TrimSpace(vals.body),
 		Delivery:   m.delivery,
 		Status:     m.sourceStatus,
 		ProposedBy: m.sourceProposedBy,
@@ -190,7 +203,7 @@ func (m *Model) ToEntry() entry.Entry {
 		TargetID:   m.sourceTargetID,
 	}
 
-	rawTags := strings.Split(m.huhVals.tags, ",")
+	rawTags := strings.Split(vals.tags, ",")
 	e.Tags = []string{}
 	for _, t := range rawTags {
 		t = strings.TrimSpace(t)
@@ -217,6 +230,7 @@ func (m *Model) SetDimensions(w, h int) {
 	m.height = h
 	if m.huhForm != nil {
 		m.rebuildHuhForm()
+		m.ensureHuhReady()
 	}
 }
 
@@ -263,8 +277,13 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	case editor.FinishedMsg:
 		if msg.Err == nil {
+			if m.huhVals == nil {
+				m.huhVals = &huhFields{}
+			}
 			m.huhVals.body = msg.Body
 			m.rebuildHuhForm()
+			m.ensureHuhReady()
+			m.applyFocus()
 		}
 		return m, nil
 	case tea.KeyPressMsg:
@@ -276,21 +295,23 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Cancel):
 			return m, func() tea.Msg { return CancelMsg{} }
 		case key.Matches(msg, m.keys.EditBody):
-			return m, editor.OpenBodyCmd(m.huhVals.body)
+			body := ""
+			if m.huhVals != nil {
+				body = m.huhVals.body
+			}
+			return m, editor.OpenBodyCmd(body)
 		case key.Matches(msg, m.keys.Next):
 			m.focusIdx = (m.focusIdx + 1) % m.fieldCount()
 			m.applyFocus()
-			if m.focusIdx == 1 && m.huhForm != nil {
-				return m, m.huhInitCmd()
-			}
 		case key.Matches(msg, m.keys.Prev):
 			m.focusIdx = (m.focusIdx - 1 + m.fieldCount()) % m.fieldCount()
 			m.applyFocus()
-			if m.focusIdx == 1 && m.huhForm != nil {
-				return m, m.huhInitCmd()
-			}
 		case key.Matches(msg, m.keys.Submit):
-			if m.focusIdx == m.focusIdxAddField() {
+			if m.focusIdx >= focusName && m.focusIdx <= focusBody {
+				// Enter advances like Tab (body newlines are alt+enter / ctrl+j).
+				m.focusIdx = (m.focusIdx + 1) % m.fieldCount()
+				m.applyFocus()
+			} else if m.focusIdx == m.focusIdxAddField() {
 				m.addField()
 			} else if m.focusIdx == m.focusIdxSave() {
 				e := m.ToEntry()
@@ -312,15 +333,28 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 			return m, cmd
 		}
-		if m.zoneManager.Get(zones.FormSave).InBounds(msg) {
+		switch {
+		case m.zoneManager.Get(zones.FormName).InBounds(msg):
+			m.focusIdx = focusName
+			m.applyFocus()
+		case m.zoneManager.Get(zones.FormGroup).InBounds(msg):
+			m.focusIdx = focusGroup
+			m.applyFocus()
+		case m.zoneManager.Get(zones.FormTags).InBounds(msg):
+			m.focusIdx = focusTags
+			m.applyFocus()
+		case m.zoneManager.Get(zones.FormBody).InBounds(msg):
+			m.focusIdx = focusBody
+			m.applyFocus()
+		case m.zoneManager.Get(zones.FormSave).InBounds(msg):
 			e := m.ToEntry()
 			pid := m.proposalID
 			return m, func() tea.Msg { return SaveMsg{E: e, ProposalID: pid} }
-		} else if m.zoneManager.Get(zones.FormCancel).InBounds(msg) {
+		case m.zoneManager.Get(zones.FormCancel).InBounds(msg):
 			return m, func() tea.Msg { return CancelMsg{} }
-		} else if m.zoneManager.Get(zones.FormAddFld).InBounds(msg) {
+		case m.zoneManager.Get(zones.FormAddFld).InBounds(msg):
 			m.addField()
-		} else {
+		default:
 			for i := range m.fields {
 				if m.zoneManager.Get(zones.FormRemoveField(i)).InBounds(msg) {
 					m.removeField(i)
@@ -346,18 +380,12 @@ func (m Model) updateFocusedField(msg tea.KeyPressMsg) (Model, tea.Cmd) {
 		} else if m.kindDD != nil {
 			m.kindDD, cmd = m.kindDD.Update(msg)
 		}
-	case 1:
-		m.rebuildHuhForm()
-		m.activateHuh()
-		if m.huhForm != nil {
-			updated, huhCmd := m.huhForm.Update(msg)
-			if f, ok := updated.(*huh.Form); ok {
-				m.huhForm = f
-			}
-			cmd = huhCmd
+	case focusName, focusGroup, focusTags, focusBody:
+		if f := m.huhField(m.focusIdx); f != nil {
+			_, cmd = f.Update(msg)
 		}
 	default:
-		fieldBase := 2
+		fieldBase := m.customFieldBase()
 		for i := range m.fields {
 			keyIdx := fieldBase + i*2
 			valIdx := keyIdx + 1
@@ -385,11 +413,12 @@ func (m *Model) applyFocus() {
 			m.kind.Focus()
 		}
 		m.syncKindFocus()
-	case 1:
-		m.rebuildHuhForm()
-		m.activateHuh()
+	case focusName, focusGroup, focusTags, focusBody:
+		if f := m.huhField(m.focusIdx); f != nil {
+			f.Focus()
+		}
 	default:
-		fieldBase := 2
+		fieldBase := m.customFieldBase()
 		for i := range m.fields {
 			keyIdx := fieldBase + i*2
 			valIdx := keyIdx + 1
@@ -411,6 +440,7 @@ func (m *Model) blurAll() {
 		m.kindDD.SetFocused(false)
 	}
 	m.kind.Blur()
+	m.blurHuh()
 	for i := range m.fields {
 		m.fields[i].Key.Blur()
 		m.fields[i].Val.Blur()
@@ -428,7 +458,7 @@ func (m *Model) addField() {
 	vInput.CharLimit = 1000
 
 	m.fields = append(m.fields, FieldPair{Key: kInput, Val: vInput})
-	m.focusIdx = 2 + (len(m.fields)-1)*2
+	m.focusIdx = m.customFieldBase() + (len(m.fields)-1)*2
 	m.applyFocus()
 }
 
@@ -443,17 +473,4 @@ func (m *Model) removeField(i int) {
 		m.focusIdx = total - 1
 	}
 	m.applyFocus()
-}
-
-func (m *Model) huhInitCmd() tea.Cmd {
-	if m.huhForm == nil {
-		return nil
-	}
-	size := func() tea.Msg {
-		return tea.WindowSizeMsg{Width: m.width, Height: m.height}
-	}
-	if m.width == 0 {
-		return m.huhForm.Init()
-	}
-	return tea.Sequence(m.huhForm.Init(), size)
 }

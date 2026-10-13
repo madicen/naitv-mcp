@@ -134,9 +134,12 @@ func TestJourney_FormFieldAddRemove(t *testing.T) {
 	m := newTestModel(t, st)
 	m = runPendingCmds(m, key("n"), 3)
 	m = typeString(m, "note")
-	m = pressTab(m)
+	m = pressTab(m) // name
 	m = typeString(m, "field-entry")
-	m = pressTab(m)
+	m = pressTab(m) // group
+	m = pressTab(m) // tags
+	m = pressTab(m) // body
+	m = pressTab(m) // + Add Field
 	m = runPendingCmds(m, key("enter"), 5)
 	m = typeString(m, "env")
 	m = pressTab(m)

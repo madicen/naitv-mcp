@@ -30,16 +30,16 @@ const (
 
 // Model is the root bubbletea model.
 type Model struct {
-	store         *store.Store
-	zoneManager   *zone.Manager
-	tabs          []tab.Tab
-	activeTab     int
-	form          form.Model
-	pendingCount  int
-	width, height int
-	statusMsg     string
-	statusExpiry  time.Time
-	undoHistoryID string
+	store          *store.Store
+	zoneManager    *zone.Manager
+	tabs           []tab.Tab
+	activeTab      int
+	form           form.Model
+	pendingCount   int
+	width, height  int
+	statusMsg      string
+	statusExpiry   time.Time
+	undoHistoryID  string
 	editProposalID string
 }
 
@@ -313,13 +313,6 @@ func (m *Model) SetDimensions(w, h int) {
 
 // renderTabBar renders the top tab bar.
 func (m *Model) renderTabBar() string {
-	entriesLabel := "Entries"
-	reviewLabel := "Review"
-	if m.pendingCount > 0 {
-		reviewLabel = reviewLabel + " " + theme.BadgeStyle.Render("("+strconv.Itoa(m.pendingCount)+")")
-	}
-	pluginsLabel := "Plugins"
-
 	render := func(label, zoneID string, active bool) string {
 		style := theme.TabInactive
 		if active {
@@ -328,9 +321,23 @@ func (m *Model) renderTabBar() string {
 		return m.zoneManager.Mark(zoneID, style.Render(label))
 	}
 
-	entriesTabLabel := render(entriesLabel, zones.TabEntries, m.activeTab == tabEntries)
-	reviewTabLabel := render(reviewLabel, zones.TabReview, m.activeTab == tabReview)
-	pluginsTabLabel := render(pluginsLabel, zones.TabPlugins, m.activeTab == tabPlugins)
+	entriesTabLabel := render("Entries", zones.TabEntries, m.activeTab == tabEntries)
+	pluginsTabLabel := render("Plugins", zones.TabPlugins, m.activeTab == tabPlugins)
+
+	// Style "Review" and the pending badge separately. Nesting BadgeStyle.Render
+	// inside TabActive.Render (Underline) makes lipgloss emit the badge's CSI
+	// sequences as literal text. Drop right padding on the label so the badge
+	// sits next to "Review" instead of after the tab's Padding(0, 2) gap.
+	reviewStyle := theme.TabInactive
+	if m.activeTab == tabReview {
+		reviewStyle = theme.TabActive
+	}
+	reviewTabLabel := reviewStyle.PaddingRight(0).Render("Review")
+	if m.pendingCount > 0 {
+		reviewTabLabel += " " + theme.BadgeStyle.Render("("+strconv.Itoa(m.pendingCount)+")")
+	}
+	reviewTabLabel += "  " // match other tabs' right padding
+	reviewTabLabel = m.zoneManager.Mark(zones.TabReview, reviewTabLabel)
 
 	return theme.TabBar.Render(lipgloss.JoinHorizontal(lipgloss.Top, entriesTabLabel, reviewTabLabel, pluginsTabLabel))
 }

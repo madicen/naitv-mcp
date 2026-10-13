@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,28 @@ func TestPendingCountBadge(t *testing.T) {
 	if !containsSubstring(m.View().Content, "(1)") {
 		t.Error("expected pending badge")
 	}
+	m.activeTab = tabReview
+	plain := stripANSI(m.renderTabBar())
+	if !strings.Contains(plain, "Review (1)") {
+		t.Fatalf("expected badge tight against Review, got %q", plain)
+	}
+	if strings.Contains(plain, "38;5") {
+		t.Fatalf("ANSI leaked into tab bar text: %q", plain)
+	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }
 
 func TestStatusExpiry(t *testing.T) {

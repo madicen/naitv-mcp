@@ -4,8 +4,8 @@ package zones
 import (
 	"fmt"
 
-	"github.com/madicen/naitv-mcp/internal/tui/theme"
 	zone "github.com/lrstanley/bubblezone/v2"
+	"github.com/madicen/naitv-mcp/internal/tui/theme"
 )
 
 // Tab zone IDs.
@@ -31,10 +31,10 @@ func EntriesRow(i int) string { return fmt.Sprintf("flat:%d", i) }
 
 // Review zones.
 const (
-	ReviewApprove     = "action:approve"
-	ReviewReject      = "action:reject"
-	ReviewEdit        = "action:edit-review"
-	ReviewApproveAll  = "action:approve-all"
+	ReviewApprove       = "action:approve"
+	ReviewReject        = "action:reject"
+	ReviewEdit          = "action:edit-review"
+	ReviewApproveAll    = "action:approve-all"
 	ReviewDetailApprove = "detail:approve"
 	ReviewDetailReject  = "detail:reject"
 	ReviewDetailEdit    = "detail:edit"
@@ -58,6 +58,10 @@ const (
 	FormCancel = "form:cancel"
 	FormAddFld = "form:add-field"
 	FormKindDD = "form:kind-dd"
+	FormName   = "form:name"
+	FormGroup  = "form:group"
+	FormTags   = "form:tags"
+	FormBody   = "form:body"
 )
 
 func FormRemoveField(i int) string { return fmt.Sprintf("form:remove-field:%d", i) }
